@@ -35,6 +35,7 @@ const FILES = [
   'migration-v19-penalty-trigger-rls.sql',
   'migration-v20-hidden-badges-after-day90.sql',
   'migration-v21-checkin-before-tasks.sql',
+  'migration-v23-leaderboard-streak-align.sql',
   'storage.sql',
 ]
 

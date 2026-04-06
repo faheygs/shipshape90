@@ -47,6 +47,7 @@ export default function LeaderboardPage() {
       const mapped = boardData.map((row: Record<string, unknown>) => ({
         ...row,
         rank: Number(row.rank),
+        current_streak: Math.max(0, Number(row.current_streak ?? 0)),
         penalty_contribution: Number(row.penalty_contribution ?? 0),
       })) as LeaderboardEntry[]
       setEntries(mapped)
@@ -162,8 +163,8 @@ export default function LeaderboardPage() {
                 <PiggyBank className="w-3.5 h-3.5 opacity-80" />
                 +${Number(entry.penalty_contribution).toFixed(2)}
               </div>
-              {entry.current_streak > 0 && (
-                <div className="flex items-center gap-1">
+              {entry.current_streak >= 1 && (
+                <div className="flex items-center gap-1 min-h-[1.5rem]" title="Current perfect-day streak">
                   <motion.div
                     animate={entry.is_on_fire ? {
                       scale: [1, 1.2, 1],
@@ -173,14 +174,14 @@ export default function LeaderboardPage() {
                   >
                     <Flame
                       className={cn(
-                        'w-5 h-5',
+                        'w-5 h-5 shrink-0',
                         entry.is_on_fire ? 'text-orange-400' : 'text-orange-400/50'
                       )}
                       fill={entry.is_on_fire ? 'currentColor' : 'none'}
                     />
                   </motion.div>
                   <span className={cn(
-                    'text-sm font-display font-bold',
+                    'text-sm font-display font-bold tabular-nums',
                     entry.is_on_fire ? 'text-orange-400' : 'text-white/40'
                   )}>
                     {entry.current_streak}
