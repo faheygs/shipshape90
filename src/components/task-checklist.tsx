@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Check, Dumbbell, Droplets, Footprints, BookOpen, Utensils, ShieldOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
-import confetti from 'canvas-confetti'
+import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
 
 const TASK_ICONS: Record<string, React.ElementType> = {
   workout1: Dumbbell,
@@ -32,17 +32,11 @@ interface TaskChecklistProps {
   initialValues: Record<string, boolean>
   isTravelDay: boolean
   disabled?: boolean
+  /** When true (locked-in day), prize-pot rows are rebuilt after each task save so penalties stay in sync. */
+  submitted?: boolean
   onUpdate?: (values: Record<string, boolean>) => void
-}
-
-function firePerfectDayConfetti() {
-  const count = 200
-  const defaults = { origin: { y: 0.7 }, zIndex: 9999 }
-
-  confetti({ ...defaults, spread: 26, startVelocity: 55, particleCount: count * 0.25 })
-  confetti({ ...defaults, spread: 60, particleCount: count * 0.2 })
-  confetti({ ...defaults, spread: 100, decay: 0.91, scalar: 0.8, particleCount: count * 0.35 })
-  confetti({ ...defaults, spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2, particleCount: count * 0.1 })
+  /** Called after DB save when every task is checked (regular or travel). Parent may submit the day or open milestone modals. */
+  onAllTasksSaved?: () => void
 }
 
 export function TaskChecklist({
@@ -53,7 +47,9 @@ export function TaskChecklist({
   initialValues,
   isTravelDay,
   disabled = false,
+  submitted = false,
   onUpdate,
+  onAllTasksSaved,
 }: TaskChecklistProps) {
   const [values, setValues] = useState<Record<string, boolean>>(initialValues)
   const [saving, setSaving] = useState<string | null>(null)
@@ -65,12 +61,6 @@ export function TaskChecklist({
     const newValues = { ...values, [taskId]: newValue }
     setValues(newValues)
     setSaving(taskId)
-    onUpdate?.(newValues)
-
-    const allDone = tasks.every(t => newValues[t.id])
-    if (allDone && !isTravelDay) {
-      setTimeout(firePerfectDayConfetti, 300)
-    }
 
     try {
       if (logId) {
@@ -78,9 +68,9 @@ export function TaskChecklist({
           .from('daily_logs')
           .update({ [taskId]: newValue, updated_at: new Date().toISOString() })
           .eq('id', logId)
-        if (error) console.error('Update error:', error)
+        if (error) throw error
       } else {
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('daily_logs')
           .upsert({
             user_id: userId,
@@ -91,7 +81,17 @@ export function TaskChecklist({
           .select()
           .single()
 
-        if (error) console.error('Upsert error:', error)
+        if (error) throw error
+      }
+
+      if (submitted) {
+        await syncPenaltyPotFromLogs(supabase)
+      }
+
+      onUpdate?.(newValues)
+
+      if (tasks.every(t => newValues[t.id])) {
+        onAllTasksSaved?.()
       }
     } catch (err) {
       console.error('Task save failed:', err)
@@ -99,7 +99,7 @@ export function TaskChecklist({
     } finally {
       setSaving(null)
     }
-  }, [values, tasks, logId, logDate, userId, isTravelDay, supabase, onUpdate])
+  }, [values, tasks, logId, logDate, userId, isTravelDay, submitted, supabase, onUpdate, onAllTasksSaved])
 
   const completedCount = tasks.filter(t => values[t.id]).length
   const totalTasks = tasks.length

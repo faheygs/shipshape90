@@ -14,7 +14,8 @@
     "start": "next start",
     "lint": "next lint",
     "clear-storage": "node scripts/clear-checkin-photos.mjs",
-    "reset-db": "node scripts/full-reset.mjs"
+    "reset-db": "node scripts/full-reset.mjs",
+    "db:bootstrap-file": "node scripts/concat-migrations.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

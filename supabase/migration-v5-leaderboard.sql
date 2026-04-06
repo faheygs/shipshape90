@@ -6,6 +6,9 @@
 -- Run this in Supabase SQL Editor
 -- ================================================
 
+-- Return type differs from base migration.sql (drops penalty_contribution); REPLACE is not enough.
+DROP FUNCTION IF EXISTS public.get_leaderboard();
+
 CREATE OR REPLACE FUNCTION public.get_leaderboard()
 RETURNS TABLE (
   user_id uuid,

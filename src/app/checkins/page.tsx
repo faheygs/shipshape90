@@ -8,7 +8,7 @@ import {
   Star, TrendingDown, TrendingUp, Minus, Pencil, Lock,
 } from 'lucide-react'
 import { TrendChart } from '@/components/trend-chart'
-import { cn, formatDate, getLocalDateString, isPhotoUrl } from '@/lib/utils'
+import { cn, formatDate, isPhotoUrl } from '@/lib/utils'
 import {
   CHECKIN_DAYS,
   CHALLENGE_START,
@@ -16,7 +16,7 @@ import {
   getChallengeDayNumberForDateString,
   getChallengeDayCalendarOnly,
 } from '@/lib/constants'
-import { useChallengeDay, useEffectiveLogDate } from '@/lib/use-challenge-day'
+import { useChallengeDay, useEffectiveLogDate, useSimulatedChallengeDayActive } from '@/lib/use-challenge-day'
 import { useSupabaseRealtimeRefresh } from '@/lib/use-supabase-realtime-refresh'
 import { ChallengeCompleteCelebration } from '@/components/challenge-complete-celebration'
 import confetti from 'canvas-confetti'
@@ -40,12 +40,18 @@ export default function CheckInsPage() {
   const [trendTab, setTrendTab] = useState<'weight' | 'bf'>('weight')
   const [editing, setEditing] = useState(false)
   const [showChallengeComplete, setShowChallengeComplete] = useState(false)
+  /** Body log row opened in detail dialog */
+  const [entryDetail, setEntryDetail] = useState<any | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
   const challengeDay = useChallengeDay()
   const today = useEffectiveLogDate()
+  const simDayActive = useSimulatedChallengeDayActive()
   /** Real calendar challenge day — dev sim must not mark future milestones as "reached" here */
   const calendarChallengeDay = getChallengeDayCalendarOnly()
+
+  /** Calendar label for the row body logging uses (matches Home / dev sim). */
+  const entryDateLabel = useMemo(() => formatDate(`${today}T12:00:00`), [today])
 
   const isMilestoneDay = CHECKIN_DAYS.some(c => c.day === challengeDay)
   const currentMilestone = CHECKIN_DAYS.find(c => c.day === challengeDay)
@@ -164,6 +170,15 @@ export default function CheckInsPage() {
       payload.notes = null
     }
 
+    if (isMilestoneDay && currentMilestone) {
+      const w = payload.weight != null ? Number(payload.weight) : NaN
+      if (!Number.isFinite(w)) {
+        setError('Weight is required on milestone check-in days (Days 1, 30, 60, 90).')
+        setSaving(false)
+        return
+      }
+    }
+
     const { error: statsError } = await supabase.from('body_stats').upsert(
       payload,
       { onConflict: 'user_id,recorded_date' }
@@ -251,6 +266,17 @@ export default function CheckInsPage() {
     const merged = [...fromCheckins, ...fromBody]
     return merged.filter((p, i, arr) => arr.findIndex(x => x.url === p.url) === i)
   }, [checkIns, dedupedStats])
+
+  const checkinForEntryDetail = useMemo(() => {
+    if (!entryDetail) return null
+    const ymd =
+      typeof entryDetail.recorded_date === 'string'
+        ? entryDetail.recorded_date.slice(0, 10)
+        : String(entryDetail.recorded_date ?? '').slice(0, 10)
+    const meta = CHECKIN_DAYS.find((c) => c.date === ymd)
+    if (!meta) return null
+    return checkIns.find((c) => c.day_number === meta.day) ?? null
+  }, [entryDetail, checkIns])
 
   if (loading) {
     return (
@@ -447,7 +473,7 @@ export default function CheckInsPage() {
         </motion.div>
       )}
 
-      {/* Today's Entry Display (when already logged and not editing) */}
+      {/* Entry for effective log date (same as Home; dev sim maps to that calendar day) */}
       {todayStat && !editing && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -456,7 +482,18 @@ export default function CheckInsPage() {
           className="glass-card p-4"
         >
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-display font-semibold">Today&apos;s Entry</h3>
+            <div>
+              <h3 className="font-display font-semibold">Body log</h3>
+              <p className="text-[11px] text-white/40 mt-0.5">
+                {entryDateLabel}
+                {challengeDay >= 1 && (
+                  <span className="text-white/50"> · {formatDayLabel(challengeDay)}</span>
+                )}
+                {simDayActive && (
+                  <span className="text-amber-400/85"> · dev sim</span>
+                )}
+              </p>
+            </div>
             {!preChallenge && (
               <button
                 onClick={startEditing}
@@ -483,7 +520,7 @@ export default function CheckInsPage() {
           </div>
           {todayStat.notes && isPhotoUrl(todayStat.notes) && (
             <div className="mt-3 max-w-[10rem] mx-auto rounded-lg overflow-hidden aspect-[3/4] bg-white/5 ring-1 ring-white/10">
-              <img src={todayStat.notes} alt="Today's photo" className="w-full h-full object-cover" />
+              <img src={todayStat.notes} alt="Progress photo" className="w-full h-full object-cover" />
             </div>
           )}
           {todayStat.notes && !isPhotoUrl(todayStat.notes) && (
@@ -532,9 +569,18 @@ export default function CheckInsPage() {
           className="glass-card p-4 space-y-4"
         >
           <div className="flex items-center justify-between">
-            <h3 className="font-display font-semibold">
-              {todayStat ? 'Edit Today\u2019s Entry' : 'Log Today'}
-            </h3>
+            <div>
+              <h3 className="font-display font-semibold">
+                {todayStat ? 'Edit body log' : 'Log body metrics'}
+              </h3>
+              <p className="text-[11px] text-white/40 mt-0.5">
+                {entryDateLabel}
+                {challengeDay >= 1 && (
+                  <span className="text-white/50"> · {formatDayLabel(challengeDay)}</span>
+                )}
+                {simDayActive && <span className="text-amber-400/85"> · dev sim</span>}
+              </p>
+            </div>
             {editing && (
               <button
                 onClick={() => setEditing(false)}
@@ -672,6 +718,125 @@ export default function CheckInsPage() {
         </div>
       </motion.div>
 
+      {/* Entry detail — full snapshot for a past body log row */}
+      <AnimatePresence>
+        {entryDetail && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+            onClick={() => setEntryDetail(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="relative w-full max-w-sm max-h-[min(88dvh,36rem)] overflow-y-auto rounded-2xl bg-navy-900 border border-white/10 shadow-2xl p-4 pt-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setEntryDetail(null)}
+                className="absolute top-3 right-3 p-1.5 rounded-full bg-white/10 text-white/60 hover:text-white hover:bg-white/15 transition-colors z-10"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              {(() => {
+                const ymd =
+                  typeof entryDetail.recorded_date === 'string'
+                    ? entryDetail.recorded_date.slice(0, 10)
+                    : String(entryDetail.recorded_date ?? '').slice(0, 10)
+                const dayNum = getChallengeDayNumberForDateString(ymd)
+                const bodyPhoto = entryDetail.notes && isPhotoUrl(entryDetail.notes) ? String(entryDetail.notes).trim() : null
+                const textNote =
+                  entryDetail.notes && !isPhotoUrl(entryDetail.notes) ? String(entryDetail.notes).trim() : null
+                const milestonePhoto =
+                  checkinForEntryDetail?.photo_url && isPhotoUrl(checkinForEntryDetail.photo_url)
+                    ? String(checkinForEntryDetail.photo_url).trim()
+                    : null
+                const showMilestonePhoto =
+                  milestonePhoto && milestonePhoto !== bodyPhoto
+
+                return (
+                  <>
+                    <div className="pr-10 mb-4">
+                      <h3 className="font-display font-bold text-lg leading-tight">
+                        {formatDate(`${ymd}T12:00:00`)}
+                      </h3>
+                      {dayNum >= 1 && (
+                        <p className="text-sm text-brand-400/90 mt-1">{formatDayLabel(dayNum)}</p>
+                      )}
+                      {checkinForEntryDetail && (
+                        <p className="text-[11px] text-yellow-400/80 mt-2 flex items-center gap-1">
+                          <Star className="w-3.5 h-3.5 shrink-0" fill="currentColor" />
+                          Milestone check-in recorded
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      {entryDetail.weight != null && entryDetail.weight !== '' && (
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-center">
+                          <p className="text-2xl font-display font-bold text-white">{entryDetail.weight}</p>
+                          <p className="text-[11px] text-white/40">Weight (lbs)</p>
+                        </div>
+                      )}
+                      {entryDetail.body_fat != null && entryDetail.body_fat !== '' && (
+                        <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-center">
+                          <p className="text-2xl font-display font-bold text-white">{entryDetail.body_fat}%</p>
+                          <p className="text-[11px] text-white/40">Body fat</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {bodyPhoto && (
+                      <div className="mb-4">
+                        <p className="text-[10px] uppercase tracking-wide text-white/35 mb-2">Body log photo</p>
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(bodyPhoto)}
+                          className="w-full rounded-xl overflow-hidden bg-white/5 ring-1 ring-white/10"
+                        >
+                          <img src={bodyPhoto} alt="" className="w-full max-h-64 object-cover" />
+                        </button>
+                      </div>
+                    )}
+
+                    {showMilestonePhoto && (
+                      <div className="mb-4">
+                        <p className="text-[10px] uppercase tracking-wide text-white/35 mb-2">Milestone photo</p>
+                        <button
+                          type="button"
+                          onClick={() => setLightboxUrl(milestonePhoto)}
+                          className="w-full rounded-xl overflow-hidden bg-white/5 ring-1 ring-yellow-500/20"
+                        >
+                          <img src={milestonePhoto} alt="" className="w-full max-h-64 object-cover" />
+                        </button>
+                      </div>
+                    )}
+
+                    {textNote && (
+                      <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3 mb-2">
+                        <p className="text-[10px] uppercase tracking-wide text-white/35 mb-1.5">Notes</p>
+                        <p className="text-sm text-white/75 leading-relaxed whitespace-pre-wrap">{textNote}</p>
+                      </div>
+                    )}
+
+                    {checkinForEntryDetail?.notes && !isPhotoUrl(checkinForEntryDetail.notes) && (
+                      <p className="text-[11px] text-white/35 mt-2">{checkinForEntryDetail.notes}</p>
+                    )}
+                  </>
+                )
+              })()}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Photo Lightbox */}
       <AnimatePresence>
         {lightboxUrl && (
@@ -679,7 +844,7 @@ export default function CheckInsPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-4"
             onClick={() => setLightboxUrl(null)}
           >
             <button
@@ -724,15 +889,39 @@ export default function CheckInsPage() {
                 exit={{ opacity: 0, height: 0 }}
                 className="space-y-2 overflow-hidden"
               >
-                {[...dedupedStats].reverse().map((stat) => (
-                  <div key={stat.id} className="glass-card p-3 flex items-center justify-between">
-                    <span className="text-xs text-white/30">{stat.recorded_date}</span>
-                    <div className="flex gap-4 text-sm">
-                      {stat.weight && <span className="text-white/60">{stat.weight} lbs</span>}
-                      {stat.body_fat && <span className="text-white/40">{stat.body_fat}%</span>}
-                    </div>
-                  </div>
-                ))}
+                {[...dedupedStats].reverse().map((stat) => {
+                  const ymd =
+                    typeof stat.recorded_date === 'string'
+                      ? stat.recorded_date.slice(0, 10)
+                      : String(stat.recorded_date ?? '').slice(0, 10)
+                  const dayNum = getChallengeDayNumberForDateString(ymd)
+                  return (
+                    <button
+                      key={stat.id}
+                      type="button"
+                      onClick={() => setEntryDetail(stat)}
+                      className="w-full glass-card p-3 flex items-center justify-between text-left rounded-xl
+                        border border-transparent hover:border-white/10 hover:bg-white/[0.03] transition-colors active:scale-[0.99]"
+                    >
+                      <div className="min-w-0">
+                        <span className="text-xs text-white/45 block">
+                          {formatDate(`${ymd}T12:00:00`)}
+                        </span>
+                        {dayNum >= 1 && (
+                          <span className="text-[10px] text-white/25">{formatDayLabel(dayNum)}</span>
+                        )}
+                      </div>
+                      <div className="flex gap-4 text-sm shrink-0">
+                        {stat.weight != null && stat.weight !== '' && (
+                          <span className="text-white/60">{stat.weight} lbs</span>
+                        )}
+                        {stat.body_fat != null && stat.body_fat !== '' && (
+                          <span className="text-white/40">{stat.body_fat}%</span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
               </motion.div>
             )}
           </AnimatePresence>

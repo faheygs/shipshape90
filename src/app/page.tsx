@@ -26,6 +26,8 @@ import confetti from 'canvas-confetti'
 import { ChallengeCompleteCelebration } from '@/components/challenge-complete-celebration'
 import { BadgeEarnedToast } from '@/components/badge-earned-toast'
 import { syncUserBadgesAndDiff, fetchUserBadgeKeys } from '@/lib/sync-user-badges'
+import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
+import { autoSubmitStalePastDays } from '@/lib/auto-submit-yesterday'
 
 const BAILOUT_QUIPS = [
   'Plot twist: you\'re building a tiny human. The gangplank can wait.',
@@ -45,7 +47,7 @@ export default function DashboardPage() {
   const [myPoints, setMyPoints] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // End Day state
+  // Lock-in / milestone modal state
   const [submitting, setSubmitting] = useState(false)
   const [showMilestoneModal, setShowMilestoneModal] = useState(false)
   const [milestoneWeight, setMilestoneWeight] = useState('')
@@ -55,7 +57,8 @@ export default function DashboardPage() {
   const [milestoneError, setMilestoneError] = useState('')
   const [showChallengeComplete, setShowChallengeComplete] = useState(false)
   const [badgeToastKeys, setBadgeToastKeys] = useState<string[] | null>(null)
-  const [hasDay1Checkin, setHasDay1Checkin] = useState(false)
+  /** Rows from `check_ins` — weight present means that milestone check-in is done. */
+  const [checkInsRows, setCheckInsRows] = useState<{ day_number: number; weight: number | null }[]>([])
   const [showInitialCheckinModal, setShowInitialCheckinModal] = useState(false)
   const badgeInitialLoadRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -70,13 +73,34 @@ export default function DashboardPage() {
   const isSubmitted = todayLog?.submitted === true
   const day1Meta = CHECKIN_DAYS.find(c => c.day === 1)!
   const preChallenge = challengeDay < 1
-  const needsInitialCheckin = challengeDay >= 1 && !hasDay1Checkin
-  const tasksLocked = isSubmitted || preChallenge || needsInitialCheckin
+
+  const hasValidCheckinForDay = useCallback(
+    (dayNum: number) => {
+      const row = checkInsRows.find((c) => c.day_number === dayNum)
+      return (
+        row != null &&
+        row.weight != null &&
+        !Number.isNaN(Number(row.weight))
+      )
+    },
+    [checkInsRows]
+  )
+
+  /** Day 1 / 30 / 60 / 90 — tasks stay locked until `check_ins` has weight for that milestone. */
+  const needsCheckinBeforeTasks =
+    challengeDay >= 1 &&
+    CHECKIN_DAYS.some((c) => c.day === challengeDay) &&
+    !hasValidCheckinForDay(challengeDay)
+
+  const needsInitialCheckin = needsCheckinBeforeTasks && challengeDay === 1
+  const tasksLocked = isSubmitted || preChallenge || needsCheckinBeforeTasks
 
   const loadData = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
     setUser(user)
+
+    await autoSubmitStalePastDays(supabase, user.id, today)
 
     const { data: existingProfile } = await supabase
       .from('profiles')
@@ -92,14 +116,14 @@ export default function DashboardPage() {
       })
     }
 
-    const [profileRes, logRes, statsRes, day1Res] = await Promise.all([
+    const [profileRes, logRes, statsRes, checkInsRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id).single(),
       supabase.from('daily_logs').select('*').eq('user_id', user.id).eq('log_date', today).maybeSingle(),
       supabase.rpc('get_my_points'),
-      supabase.from('check_ins').select('id').eq('user_id', user.id).eq('day_number', 1).maybeSingle(),
+      supabase.from('check_ins').select('day_number, weight').eq('user_id', user.id),
     ])
 
-    setHasDay1Checkin(!!day1Res.data)
+    setCheckInsRows(checkInsRes.data ?? [])
     if (profileRes.data) setProfile(profileRes.data)
     if (logRes.data) {
       setTodayLog(logRes.data)
@@ -119,11 +143,17 @@ export default function DashboardPage() {
       .select('log_date, is_travel_day, submitted, workout1, workout2, water, steps, no_sugar, reading, diet')
       .eq('user_id', user.id)
       .order('log_date', { ascending: false })
-      .limit(30)
+      .limit(120)
 
     if (streakLogs && streakLogs.length > 0) {
       let currentStreak = 0
       for (const log of streakLogs) {
+        const logDay =
+          typeof log.log_date === 'string' ? log.log_date.slice(0, 10) : String(log.log_date ?? '').slice(0, 10)
+        const isInProgressToday = logDay === today && !log.submitted
+        // Do not let an unsubmitted *today* row break the count — streak only updates after the day is locked in.
+        if (isInProgressToday) continue
+
         if (log.is_travel_day) {
           if (!log.submitted) break
           const travelPerfect =
@@ -160,7 +190,7 @@ export default function DashboardPage() {
   const dismissBadgeToast = useCallback(() => setBadgeToastKeys(null), [])
 
   const toggleTravelDay = async () => {
-    if (!user || isSubmitted || preChallenge || needsInitialCheckin) return
+    if (!user || isSubmitted || preChallenge || needsCheckinBeforeTasks) return
     const newValue = !isTravelDay
     if (newValue && profile && profile.travel_days_used >= MAX_TRAVEL_DAYS) return
 
@@ -191,20 +221,44 @@ export default function DashboardPage() {
     loadData()
   }
 
-  // --- End Day ---
+  // --- Lock day: last task checked → auto lock; midnight auto-submits stale days; milestone / check-in modals ---
   function handleEndDay() {
     if (preChallenge) return
-    if (needsInitialCheckin) {
-      setShowInitialCheckinModal(true)
+    if (needsCheckinBeforeTasks) {
+      if (challengeDay === 1) setShowInitialCheckinModal(true)
+      else setShowMilestoneModal(true)
       setMilestoneError('')
       return
     }
-    if (isMilestoneDay) {
-      setShowMilestoneModal(true)
-      setMilestoneError('')
+    submitDay()
+  }
+
+  /** Lock today in DB from current client state — avoids upsert quirks; always rebuilds penalty_pot. */
+  async function persistTodaySubmitted() {
+    if (!user) return
+    const { data: row } = await supabase
+      .from('daily_logs')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('log_date', today)
+      .maybeSingle()
+
+    if (row?.id) {
+      const { error } = await supabase
+        .from('daily_logs')
+        .update({ submitted: true, is_travel_day: isTravelDay })
+        .eq('id', row.id)
+      if (error) throw error
     } else {
-      submitDay()
+      const { error } = await supabase.from('daily_logs').insert({
+        user_id: user.id,
+        log_date: today,
+        is_travel_day: isTravelDay,
+        submitted: true,
+      })
+      if (error) throw error
     }
+    await syncPenaltyPotFromLogs(supabase)
   }
 
   async function submitDay() {
@@ -213,121 +267,27 @@ export default function DashboardPage() {
 
     const badgeKeysBefore = await fetchUserBadgeKeys(supabase, user.id)
 
-    const logData = {
-      user_id: user.id,
-      log_date: today,
-      is_travel_day: isTravelDay,
-      submitted: true,
-    }
-
-    await supabase.from('daily_logs').upsert(logData, { onConflict: 'user_id,log_date' })
+    await persistTodaySubmitted()
 
     const { newBadgeKeys } = await syncUserBadgesAndDiff(supabase, user.id, {
       beforeKeys: badgeKeysBefore,
     })
     if (newBadgeKeys.length > 0) setBadgeToastKeys(newBadgeKeys)
 
-    confetti({
-      particleCount: 80,
-      spread: 70,
-      origin: { y: 0.6 },
-      zIndex: 9999,
-      colors: ['#f97316', '#fb923c', '#fdba74'],
-    })
+    if (challengeDay !== 90) {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.6 },
+        zIndex: 9999,
+        colors: ['#f97316', '#fb923c', '#fdba74'],
+      })
+    }
 
     await loadData()
     setSubmitting(false)
-  }
 
-  async function submitMilestoneAndDay() {
-    if (!user) return
-
-    if (!milestoneWeight.trim()) {
-      setMilestoneError('Weight is required for milestone check-in')
-      return
-    }
-    if (!milestoneBf.trim()) {
-      setMilestoneError('Body fat % is required for milestone check-in')
-      return
-    }
-    if (!milestoneFile) {
-      setMilestoneError('A progress photo is required for milestone check-in')
-      return
-    }
-
-    setSubmitting(true)
-    setMilestoneError('')
-
-    const badgeKeysBefore = await fetchUserBadgeKeys(supabase, user.id)
-
-    // Upload photo
-    const ext = milestoneFile.name.split('.').pop()
-    const filePath = `${user.id}/day${currentMilestone!.day}-${Date.now()}.${ext}`
-
-    const { error: uploadError } = await supabase.storage
-      .from('checkin-photos')
-      .upload(filePath, milestoneFile, { upsert: true })
-
-    if (uploadError) {
-      setMilestoneError(`Photo upload failed: ${uploadError.message}`)
-      setSubmitting(false)
-      return
-    }
-
-    const { data: urlData } = supabase.storage
-      .from('checkin-photos')
-      .getPublicUrl(filePath)
-    const photoUrl = urlData.publicUrl
-
-    // Save body stats
-    const { error: statsError } = await supabase.from('body_stats').upsert({
-      user_id: user.id,
-      recorded_date: today,
-      weight: parseFloat(milestoneWeight),
-      body_fat: parseFloat(milestoneBf),
-      notes: photoUrl,
-    }, { onConflict: 'user_id,recorded_date' })
-
-    if (statsError) {
-      setMilestoneError(`Failed to save stats: ${statsError.message}`)
-      setSubmitting(false)
-      return
-    }
-
-    // Save milestone check-in
-    await supabase.from('check_ins').upsert({
-      user_id: user.id,
-      day_number: currentMilestone!.day,
-      photo_url: photoUrl,
-      weight: parseFloat(milestoneWeight),
-      body_fat: parseFloat(milestoneBf),
-      notes: `${currentMilestone!.label}`,
-    }, { onConflict: 'user_id,day_number' })
-
-    // Now submit the day
-    const logData = {
-      user_id: user.id,
-      log_date: today,
-      is_travel_day: isTravelDay,
-      submitted: true,
-    }
-
-    await supabase.from('daily_logs').upsert(logData, { onConflict: 'user_id,log_date' })
-
-    const { newBadgeKeys } = await syncUserBadgesAndDiff(supabase, user.id, {
-      beforeKeys: badgeKeysBefore,
-    })
-    if (newBadgeKeys.length > 0) setBadgeToastKeys(newBadgeKeys)
-
-    const finishedDay90 = currentMilestone!.day === 90
-
-    setShowMilestoneModal(false)
-    setMilestoneWeight('')
-    setMilestoneBf('')
-    setMilestoneFile(null)
-    setMilestonePreview(null)
-
-    if (finishedDay90) {
+    if (challengeDay === 90) {
       confetti({
         particleCount: 220,
         spread: 100,
@@ -354,37 +314,16 @@ export default function DashboardPage() {
           colors: ['#22c55e', '#38bdf8'],
         })
       }, 250)
-    } else {
-      confetti({
-        particleCount: 150,
-        spread: 90,
-        origin: { y: 0.5 },
-        zIndex: 9999,
-        colors: ['#f97316', '#eab308', '#22c55e'],
-      })
-    }
-
-    await loadData()
-    setSubmitting(false)
-
-    if (finishedDay90) {
       setShowChallengeComplete(true)
     }
   }
 
-  async function submitInitialCheckin() {
-    if (!user) return
+  /** Milestone check-in only — unlocks tasks; calendar day locks when the last task is checked or at midnight. */
+  async function submitMilestoneCheckin() {
+    if (!user || !currentMilestone) return
 
     if (!milestoneWeight.trim()) {
-      setMilestoneError('Weight is required for your initial check-in')
-      return
-    }
-    if (!milestoneBf.trim()) {
-      setMilestoneError('Body fat % is required for your initial check-in')
-      return
-    }
-    if (!milestoneFile) {
-      setMilestoneError('A before photo is required for your initial check-in')
+      setMilestoneError('Weight is required for milestone check-in')
       return
     }
 
@@ -393,29 +332,35 @@ export default function DashboardPage() {
 
     const badgeKeysBefore = await fetchUserBadgeKeys(supabase, user.id)
 
-    const ext = milestoneFile.name.split('.').pop()
-    const filePath = `${user.id}/day1-${Date.now()}.${ext}`
+    let photoUrl: string | null = null
+    if (milestoneFile) {
+      const ext = milestoneFile.name.split('.').pop()
+      const filePath = `${user.id}/day${currentMilestone.day}-${Date.now()}.${ext}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('checkin-photos')
-      .upload(filePath, milestoneFile, { upsert: true })
+      const { error: uploadError } = await supabase.storage
+        .from('checkin-photos')
+        .upload(filePath, milestoneFile, { upsert: true })
 
-    if (uploadError) {
-      setMilestoneError(`Photo upload failed: ${uploadError.message}`)
-      setSubmitting(false)
-      return
+      if (uploadError) {
+        setMilestoneError(`Photo upload failed: ${uploadError.message}`)
+        setSubmitting(false)
+        return
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('checkin-photos')
+        .getPublicUrl(filePath)
+      photoUrl = urlData.publicUrl
     }
 
-    const { data: urlData } = supabase.storage
-      .from('checkin-photos')
-      .getPublicUrl(filePath)
-    const photoUrl = urlData.publicUrl
+    const w = parseFloat(milestoneWeight)
+    const bfParsed = milestoneBf.trim() ? parseFloat(milestoneBf) : null
 
     const { error: statsError } = await supabase.from('body_stats').upsert({
       user_id: user.id,
       recorded_date: today,
-      weight: parseFloat(milestoneWeight),
-      body_fat: parseFloat(milestoneBf),
+      weight: w,
+      body_fat: bfParsed,
       notes: photoUrl,
     }, { onConflict: 'user_id,recorded_date' })
 
@@ -425,14 +370,102 @@ export default function DashboardPage() {
       return
     }
 
-    await supabase.from('check_ins').upsert({
+    const checkPayload: Record<string, unknown> = {
+      user_id: user.id,
+      day_number: currentMilestone.day,
+      weight: w,
+      body_fat: bfParsed,
+      notes: `${currentMilestone.label}`,
+    }
+    if (photoUrl) checkPayload.photo_url = photoUrl
+
+    await supabase.from('check_ins').upsert(checkPayload, { onConflict: 'user_id,day_number' })
+
+    const { newBadgeKeys } = await syncUserBadgesAndDiff(supabase, user.id, {
+      beforeKeys: badgeKeysBefore,
+    })
+    if (newBadgeKeys.length > 0) setBadgeToastKeys(newBadgeKeys)
+
+    setShowMilestoneModal(false)
+    setMilestoneWeight('')
+    setMilestoneBf('')
+    setMilestoneFile(null)
+    setMilestonePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+
+    confetti({
+      particleCount: 150,
+      spread: 90,
+      origin: { y: 0.5 },
+      zIndex: 9999,
+      colors: ['#f97316', '#eab308', '#22c55e'],
+    })
+
+    await loadData()
+    setSubmitting(false)
+  }
+
+  async function submitInitialCheckin() {
+    if (!user) return
+
+    if (!milestoneWeight.trim()) {
+      setMilestoneError('Weight is required for your initial check-in')
+      return
+    }
+
+    setSubmitting(true)
+    setMilestoneError('')
+
+    const badgeKeysBefore = await fetchUserBadgeKeys(supabase, user.id)
+
+    let photoUrl: string | null = null
+    if (milestoneFile) {
+      const ext = milestoneFile.name.split('.').pop()
+      const filePath = `${user.id}/day1-${Date.now()}.${ext}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('checkin-photos')
+        .upload(filePath, milestoneFile, { upsert: true })
+
+      if (uploadError) {
+        setMilestoneError(`Photo upload failed: ${uploadError.message}`)
+        setSubmitting(false)
+        return
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('checkin-photos')
+        .getPublicUrl(filePath)
+      photoUrl = urlData.publicUrl
+    }
+
+    const w = parseFloat(milestoneWeight)
+    const bfParsed = milestoneBf.trim() ? parseFloat(milestoneBf) : null
+
+    const { error: statsError } = await supabase.from('body_stats').upsert({
+      user_id: user.id,
+      recorded_date: today,
+      weight: w,
+      body_fat: bfParsed,
+      notes: photoUrl,
+    }, { onConflict: 'user_id,recorded_date' })
+
+    if (statsError) {
+      setMilestoneError(`Failed to save stats: ${statsError.message}`)
+      setSubmitting(false)
+      return
+    }
+
+    const day1Payload: Record<string, unknown> = {
       user_id: user.id,
       day_number: 1,
-      photo_url: photoUrl,
-      weight: parseFloat(milestoneWeight),
-      body_fat: parseFloat(milestoneBf),
+      weight: w,
+      body_fat: bfParsed,
       notes: `${day1Meta.label}`,
-    }, { onConflict: 'user_id,day_number' })
+    }
+    if (photoUrl) day1Payload.photo_url = photoUrl
+
+    await supabase.from('check_ins').upsert(day1Payload, { onConflict: 'user_id,day_number' })
 
     await supabase.from('profiles').update({ onboarded: true }).eq('id', user.id)
 
@@ -573,38 +606,6 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
-      {/* Initial check-in required (after Day 1 begins) */}
-      {needsInitialCheckin && !isSubmitted && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-card-bright p-4 border-brand-500/30 bg-brand-500/5"
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <Anchor className="w-5 h-5 text-brand-400" />
-            <span className="font-display font-bold text-brand-200">Initial check-in</span>
-          </div>
-          <p className="text-sm text-white/60">{day1Meta.label} — {day1Meta.tagline}</p>
-          <p className="text-xs text-brand-400/80 mt-1">Enter starting weight, body fat %, and a before photo. Tasks unlock after.</p>
-        </motion.div>
-      )}
-
-      {/* Milestone Banner */}
-      {isMilestoneDay && !isSubmitted && !needsInitialCheckin && currentMilestone && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-card-bright p-4 border-yellow-500/30 bg-yellow-500/5"
-        >
-          <div className="flex items-center gap-2 mb-1">
-            <Star className="w-5 h-5 text-yellow-400" fill="currentColor" />
-            <span className="font-display font-bold text-yellow-300">Milestone Day!</span>
-          </div>
-          <p className="text-sm text-white/60">{currentMilestone.label} — {currentMilestone.tagline}</p>
-          <p className="text-xs text-yellow-400/70 mt-1">Photo, weight & BF% will be required when you end your day.</p>
-        </motion.div>
-      )}
-
       {/* Stats Row — same layout: value · label · snippet (0 shown when empty) */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -667,8 +668,8 @@ export default function DashboardPage() {
                 ? 'Locked in · travel range −15 to +5'
                 : 'Locked in · full day −21…+10')
               : (isTravelDay
-                ? 'Not in your total until you end the day · travel −15…+5'
-                : 'Not in your total until you end the day · full day −21…+10')}
+                ? 'Not in your total until the day locks in · travel −15…+5'
+                : 'Not in your total until the day locks in · full day −21…+10')}
           </span>
         </div>
         <span
@@ -691,13 +692,13 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={toggleTravelDay}
-            disabled={preChallenge || needsInitialCheckin}
+            disabled={preChallenge || needsCheckinBeforeTasks}
             className={cn(
               'w-full flex items-center justify-between p-4 rounded-xl transition-all',
               isTravelDay
                 ? 'bg-blue-500/15 border border-blue-500/30'
                 : 'bg-white/5 border border-white/5',
-              (preChallenge || needsInitialCheckin) && 'opacity-45 pointer-events-none cursor-not-allowed',
+              (preChallenge || needsCheckinBeforeTasks) && 'opacity-45 pointer-events-none cursor-not-allowed',
             )}
           >
             <div className="flex items-center gap-3">
@@ -723,6 +724,72 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
+      {/* Required check-ins — above tasks so they aren’t missed */}
+      {needsInitialCheckin && !isSubmitted && !preChallenge && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="rounded-2xl border border-brand-400/40 bg-gradient-to-br from-brand-500/15 to-cyan-500/10 p-4 space-y-3"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200/95">
+            Required — complete before tasks unlock
+          </p>
+          <p className="text-sm text-white/75 leading-snug">
+            <span className="font-display font-semibold text-white">{day1Meta.label}</span>
+            <span className="text-white/45"> · </span>
+            {day1Meta.tagline} Weight is required (body fat and photo optional). Tasks unlock after you submit.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setShowInitialCheckinModal(true)
+              setMilestoneError('')
+            }}
+            disabled={submitting}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-display font-bold text-sm
+              bg-gradient-to-r from-brand-600 to-cyan-600 text-white shadow-lg shadow-brand-500/25
+              active:scale-[0.98] disabled:opacity-50 transition-all"
+          >
+            <Anchor className="w-5 h-5 shrink-0" />
+            Open initial check-in
+          </button>
+        </motion.div>
+      )}
+
+      {isMilestoneDay && !isSubmitted && needsCheckinBeforeTasks && !preChallenge && currentMilestone && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="rounded-2xl border border-yellow-400/45 bg-gradient-to-br from-yellow-500/15 to-brand-500/10 p-4 space-y-3"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-200/95">
+            Required — milestone check-in
+          </p>
+          <p className="text-sm text-white/75 leading-snug">
+            <span className="font-display font-semibold text-white">{currentMilestone.label}</span>
+            <span className="text-white/45"> · </span>
+            {currentMilestone.tagline} Enter weight to continue (photo optional). Tasks stay locked until this check-in
+            is saved — then log your tasks and lock the day as usual.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setShowMilestoneModal(true)
+              setMilestoneError('')
+            }}
+            disabled={submitting}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-display font-bold text-sm
+              bg-gradient-to-r from-yellow-500 to-brand-500 text-white shadow-lg shadow-yellow-500/25
+              active:scale-[0.98] disabled:opacity-50 transition-all"
+          >
+            <Star className="w-5 h-5 shrink-0" fill="currentColor" />
+            Open milestone check-in
+          </button>
+        </motion.div>
+      )}
+
       {/* Task Checklist */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -742,7 +809,13 @@ export default function DashboardPage() {
             <div className="flex items-center gap-1.5 text-white/40">
               <Lock className="w-3.5 h-3.5" />
               <span className="text-xs font-medium max-w-[10rem] text-right leading-tight">
-                {preChallenge ? 'Opens Day 1' : needsInitialCheckin ? 'After initial check-in' : ''}
+                {preChallenge
+                  ? 'Opens Day 1'
+                  : needsCheckinBeforeTasks
+                    ? needsInitialCheckin
+                      ? 'After initial check-in'
+                      : 'After milestone check-in'
+                    : ''}
               </span>
             </div>
           ) : (
@@ -757,67 +830,26 @@ export default function DashboardPage() {
           userId={user?.id}
           initialValues={taskValues}
           isTravelDay={isTravelDay}
-          disabled={tasksLocked}
+          disabled={tasksLocked || submitting}
           onUpdate={() => setTimeout(loadData, 500)}
+          onAllTasksSaved={() => {
+            if (submitting) return
+            handleEndDay()
+          }}
         />
       </motion.div>
 
-      {/* End Day Button */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3 }}
-      >
-        {isSubmitted ? (
-          <div className="flex items-center justify-center gap-2 p-4 rounded-xl bg-green-500/10 border border-green-500/20">
-            <CheckCircle2 className="w-5 h-5 text-green-400" />
-            <span className="font-display font-semibold text-green-400">Day {challengeDay} Complete</span>
-          </div>
-        ) : preChallenge ? (
-          <button
-            type="button"
-            disabled
-            className="w-full flex items-center justify-center gap-3 py-4 rounded-xl font-display font-bold text-base
-              bg-white/5 border border-white/10 text-white/45 cursor-not-allowed"
-          >
-            <Lock className="w-5 h-5" />
-            Challenge starts {formatDate(CHALLENGE_START)}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleEndDay}
-            disabled={submitting}
-            className={cn(
-              'w-full flex items-center justify-center gap-3 py-4 rounded-xl font-display font-bold text-base transition-all',
-              'active:scale-[0.98] disabled:opacity-50',
-              needsInitialCheckin
-                ? 'bg-gradient-to-r from-brand-600 to-cyan-600 text-white shadow-lg shadow-brand-500/25'
-                : isMilestoneDay
-                  ? 'bg-gradient-to-r from-yellow-500 to-brand-500 text-white shadow-lg shadow-brand-500/30'
-                  : 'bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow-lg shadow-brand-500/20'
-            )}
-          >
-            {submitting ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : needsInitialCheckin ? (
-              <Anchor className="w-5 h-5" />
-            ) : isMilestoneDay ? (
-              <Star className="w-5 h-5" />
-            ) : (
-              <CheckCircle2 className="w-5 h-5" />
-            )}
-            {submitting
-              ? 'Submitting...'
-              : needsInitialCheckin
-                ? 'Initial check-in'
-                : isMilestoneDay
-                  ? `End Day ${challengeDay} — Milestone Check-in`
-                  : `End Day ${challengeDay}`
-            }
-          </button>
-        )}
-      </motion.div>
+      {isSubmitted && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.28 }}
+          className="flex items-center justify-center gap-2 p-4 rounded-xl bg-green-500/10 border border-green-500/20"
+        >
+          <CheckCircle2 className="w-5 h-5 text-green-400" />
+          <span className="font-display font-semibold text-green-400">Day {challengeDay} locked in</span>
+        </motion.div>
+      )}
 
       {/* Milestone Check-in — centered dialog (not bottom sheet) */}
       <AnimatePresence>
@@ -854,7 +886,8 @@ export default function DashboardPage() {
                 </div>
                 <p className="text-xs text-white/50 leading-snug">{currentMilestone.tagline}</p>
                 <p className="text-[11px] text-yellow-400/80 mt-1.5 leading-snug">
-                  Weight, body fat %, and a progress photo are required to end your day.
+                  Weight is required. Body fat and photo are optional. This saves your check-in and unlocks tasks — lock
+                  the day after you complete them.
                 </p>
               </div>
 
@@ -938,7 +971,7 @@ export default function DashboardPage() {
               {/* Submit */}
               <button
                 type="button"
-                onClick={submitMilestoneAndDay}
+                onClick={submitMilestoneCheckin}
                 disabled={submitting}
                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl
                            bg-gradient-to-r from-yellow-500 to-brand-500 text-white
@@ -950,7 +983,7 @@ export default function DashboardPage() {
                 ) : (
                   <CheckCircle2 className="w-5 h-5" />
                 )}
-                {submitting ? 'Submitting...' : `Lock In Day ${challengeDay}`}
+                {submitting ? 'Submitting...' : 'Save check-in & unlock tasks'}
               </button>
             </motion.div>
           </motion.div>
@@ -991,7 +1024,7 @@ export default function DashboardPage() {
                 </div>
                 <p className="text-xs text-white/50 leading-snug">{day1Meta.tagline}</p>
                 <p className="text-[11px] text-brand-400/85 mt-1.5 leading-snug">
-                  Weight, body fat %, and a before photo — same as milestone check-ins.
+                  Weight is required. Body fat and photo are optional. Tasks unlock after you submit.
                 </p>
               </div>
 

@@ -7,6 +7,7 @@ import { motion } from 'framer-motion'
 import { Crown, Flame, Trophy, Loader2, PiggyBank } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BASE_PRIZE_POOL_DOLLARS, MISS_PENALTY_DOLLARS, LEADERBOARD_POLL_INTERVAL_MS } from '@/lib/constants'
+import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
 
 interface LeaderboardEntry {
   user_id: string
@@ -34,25 +35,23 @@ export default function LeaderboardPage() {
   const supabase = createClient()
 
   const load = useCallback(async () => {
+    await syncPenaltyPotFromLogs(supabase)
     await supabase.rpc('sync_user_badges')
 
-    const [boardRes, potRes] = await Promise.all([
-      supabase.rpc('get_leaderboard'),
-      supabase.from('penalty_pot').select('amount'),
-    ])
-
-    if (boardRes.data) {
-      setEntries(
-        boardRes.data.map((row: Record<string, unknown>) => ({
-          ...row,
-          rank: Number(row.rank),
-          penalty_contribution: Number(row.penalty_contribution ?? 0),
-        })) as LeaderboardEntry[],
-      )
+    const { data: boardData, error: boardError } = await supabase.rpc('get_leaderboard')
+    if (boardError) {
+      console.error(boardError)
     }
-    if (potRes.data) {
-      const total = potRes.data.reduce((sum: number, r: any) => sum + Number(r.amount), 0)
-      setPotTotal(total)
+
+    if (boardData) {
+      const mapped = boardData.map((row: Record<string, unknown>) => ({
+        ...row,
+        rank: Number(row.rank),
+        penalty_contribution: Number(row.penalty_contribution ?? 0),
+      })) as LeaderboardEntry[]
+      setEntries(mapped)
+      const potSum = mapped.reduce((sum, e) => sum + e.penalty_contribution, 0)
+      setPotTotal(potSum)
     }
     setLoading(false)
   }, [supabase])
@@ -81,7 +80,9 @@ export default function LeaderboardPage() {
     <div className="pb-4 space-y-6">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-display font-bold">Leaderboard</h1>
-        <p className="text-white/40 text-sm mt-0.5">Rankings · streaks · prize pot contributions (${MISS_PENALTY_DOLLARS}/missed task).</p>
+        <p className="text-white/40 text-sm mt-0.5">
+          Rankings · streaks · pot contributions (${MISS_PENALTY_DOLLARS} per missed task on submitted days).
+        </p>
       </motion.div>
 
       {/* Prize Pot */}
@@ -101,7 +102,7 @@ export default function LeaderboardPage() {
             Prize pot — ${BASE_PRIZE_POOL_DOLLARS} base + ${potTotal.toFixed(2)} from missed tasks
           </p>
           <p className="text-[11px] text-white/25 mt-1">
-            Winner takes all on Day 90. Penalties lock in when you end each day.
+            Winner takes all on Day 90. Missed tasks count toward the pot when a day is submitted (locked in).
           </p>
         </div>
       </motion.div>
