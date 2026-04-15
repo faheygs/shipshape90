@@ -55,3 +55,17 @@ export async function autoSubmitStalePastDays(
   if (ok) await syncPenaltyPotFromLogs(supabase)
   return ok
 }
+
+/**
+ * Creates blank submitted daily_logs rows for every past challenge day that
+ * has no row, for all active participants. The DB trigger populates
+ * penalty_pot automatically. Idempotent — safe to call on every page load.
+ */
+export async function backfillMissingDailyLogs(supabase: SupabaseClient): Promise<number> {
+  const { data, error } = await supabase.rpc('backfill_missing_daily_logs')
+  if (error) {
+    console.warn('[backfillMissingDailyLogs]', error.message)
+    return 0
+  }
+  return (data as number) ?? 0
+}

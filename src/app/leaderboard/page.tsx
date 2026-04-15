@@ -8,6 +8,7 @@ import { Crown, Flame, Trophy, Loader2, PiggyBank } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BASE_PRIZE_POOL_DOLLARS, MISS_PENALTY_DOLLARS, LEADERBOARD_POLL_INTERVAL_MS } from '@/lib/constants'
 import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
+import { backfillMissingDailyLogs } from '@/lib/auto-submit-yesterday'
 
 interface LeaderboardEntry {
   user_id: string
@@ -35,6 +36,7 @@ export default function LeaderboardPage() {
   const supabase = createClient()
 
   const load = useCallback(async () => {
+    await backfillMissingDailyLogs(supabase)
     await syncPenaltyPotFromLogs(supabase)
     await supabase.rpc('sync_user_badges')
 

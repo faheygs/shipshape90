@@ -27,7 +27,7 @@ import { ChallengeCompleteCelebration } from '@/components/challenge-complete-ce
 import { BadgeEarnedToast } from '@/components/badge-earned-toast'
 import { syncUserBadgesAndDiff, fetchUserBadgeKeys } from '@/lib/sync-user-badges'
 import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
-import { autoSubmitStalePastDays } from '@/lib/auto-submit-yesterday'
+import { autoSubmitStalePastDays, backfillMissingDailyLogs } from '@/lib/auto-submit-yesterday'
 
 const BAILOUT_QUIPS = [
   'Plot twist: you\'re building a tiny human. The gangplank can wait.',
@@ -100,6 +100,7 @@ export default function DashboardPage() {
     if (!user) return
     setUser(user)
 
+    await backfillMissingDailyLogs(supabase)
     await autoSubmitStalePastDays(supabase, user.id, today)
 
     const { data: existingProfile } = await supabase
