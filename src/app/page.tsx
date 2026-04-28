@@ -910,7 +910,6 @@ export default function DashboardPage() {
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={handleMilestoneFile}
                   className="hidden"
                 />
@@ -1046,7 +1045,6 @@ export default function DashboardPage() {
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={handleMilestoneFile}
                   className="hidden"
                 />

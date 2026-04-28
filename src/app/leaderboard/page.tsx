@@ -4,9 +4,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useSupabaseRealtimeRefresh } from '@/lib/use-supabase-realtime-refresh'
 import { motion } from 'framer-motion'
-import { Crown, Flame, Trophy, Loader2, PiggyBank } from 'lucide-react'
+import { Crown, Trophy, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { BASE_PRIZE_POOL_DOLLARS, MISS_PENALTY_DOLLARS, LEADERBOARD_POLL_INTERVAL_MS } from '@/lib/constants'
+import { BASE_PRIZE_POOL_DOLLARS, LEADERBOARD_POLL_INTERVAL_MS } from '@/lib/constants'
 import { syncPenaltyPotFromLogs } from '@/lib/sync-penalty-pot'
 import { backfillMissingDailyLogs } from '@/lib/auto-submit-yesterday'
 
@@ -15,9 +15,6 @@ interface LeaderboardEntry {
   display_name: string
   avatar_emoji: string
   rank: number
-  current_streak: number
-  is_on_fire: boolean
-  penalty_contribution: number
 }
 
 const RANK_STYLES: Record<number, string> = {
@@ -31,7 +28,6 @@ const RANK_BADGES: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd', 4: '
 
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
-  const [potTotal, setPotTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const supabase = createClient()
 
@@ -49,12 +45,8 @@ export default function LeaderboardPage() {
       const mapped = boardData.map((row: Record<string, unknown>) => ({
         ...row,
         rank: Number(row.rank),
-        current_streak: Math.max(0, Number(row.current_streak ?? 0)),
-        penalty_contribution: Number(row.penalty_contribution ?? 0),
       })) as LeaderboardEntry[]
       setEntries(mapped)
-      const potSum = mapped.reduce((sum, e) => sum + e.penalty_contribution, 0)
-      setPotTotal(potSum)
     }
     setLoading(false)
   }, [supabase])
@@ -83,9 +75,7 @@ export default function LeaderboardPage() {
     <div className="pb-4 space-y-6">
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="text-2xl font-display font-bold">Leaderboard</h1>
-        <p className="text-white/40 text-sm mt-0.5">
-          Rankings · streaks · pot contributions (${MISS_PENALTY_DOLLARS} per missed task on submitted days).
-        </p>
+        <p className="text-white/40 text-sm mt-0.5">Current rankings.</p>
       </motion.div>
 
       {/* Prize Pot */}
@@ -99,13 +89,11 @@ export default function LeaderboardPage() {
         <div className="relative">
           <Trophy className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
           <p className="text-3xl font-display font-bold text-gradient">
-            ${BASE_PRIZE_POOL_DOLLARS + potTotal}
+            ${BASE_PRIZE_POOL_DOLLARS}
           </p>
-          <p className="text-white/40 text-sm mt-1">
-            Prize pot — ${BASE_PRIZE_POOL_DOLLARS} base + ${potTotal.toFixed(2)} from missed tasks
-          </p>
+          <p className="text-white/40 text-sm mt-1">Prize pot</p>
           <p className="text-[11px] text-white/25 mt-1">
-            Winner takes all on Day 90. Missed tasks count toward the pot when a day is submitted (locked in).
+            Winner takes all on Day 90.
           </p>
         </div>
       </motion.div>
@@ -151,45 +139,6 @@ export default function LeaderboardPage() {
                 </span>
               </div>
               <span className="text-[11px] text-white/30 ml-10">{RANK_BADGES[entry.rank] || ''}</span>
-            </div>
-
-            {/* Pot contribution + streak */}
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              <div
-                className={cn(
-                  'flex items-center gap-1 text-xs font-medium tabular-nums',
-                  entry.penalty_contribution > 0 ? 'text-amber-400/90' : 'text-white/25'
-                )}
-                title={`$${MISS_PENALTY_DOLLARS} per missed task when a day is submitted`}
-              >
-                <PiggyBank className="w-3.5 h-3.5 opacity-80" />
-                +${Number(entry.penalty_contribution).toFixed(2)}
-              </div>
-              {entry.current_streak >= 1 && (
-                <div className="flex items-center gap-1 min-h-[1.5rem]" title="Current perfect-day streak">
-                  <motion.div
-                    animate={entry.is_on_fire ? {
-                      scale: [1, 1.2, 1],
-                      rotate: [-3, 3, -3],
-                    } : {}}
-                    transition={{ duration: 0.5, repeat: Infinity, repeatType: 'reverse' }}
-                  >
-                    <Flame
-                      className={cn(
-                        'w-5 h-5 shrink-0',
-                        entry.is_on_fire ? 'text-orange-400' : 'text-orange-400/50'
-                      )}
-                      fill={entry.is_on_fire ? 'currentColor' : 'none'}
-                    />
-                  </motion.div>
-                  <span className={cn(
-                    'text-sm font-display font-bold tabular-nums',
-                    entry.is_on_fire ? 'text-orange-400' : 'text-white/40'
-                  )}>
-                    {entry.current_streak}
-                  </span>
-                </div>
-              )}
             </div>
           </motion.div>
         ))}
