@@ -1,0 +1,25 @@
+{
+  "name": "@shipshape/ui-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@shipshape/tokens": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.3",
+    "react-native": "0.86.x",
+    "react-native-svg": "^15.15.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-svg": "15.15.4",
+    "typescript": "~6.0.3"
+  }
+}

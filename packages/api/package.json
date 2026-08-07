@@ -1,0 +1,19 @@
+{
+  "name": "@shipshape/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@shipshape/domain": "workspace:*",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3"
+  }
+}

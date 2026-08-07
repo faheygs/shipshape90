@@ -1,0 +1,15 @@
+import type { Metadata } from "next";
+import { LegalShell } from "../legal-shell";
+
+export const metadata: Metadata = { title: "Support", description: "Help, safety information, and account support for ShipShape 90." };
+
+export default function SupportPage() {
+  return <LegalShell eyebrow="SUPPORT" title="We’ll get you moving." intro="Quick answers for accounts, challenges, scoring, notifications, and safety.">
+    <section className="supportLead"><h2>Need a human?</h2><p>Email <a className="supportButton" href="mailto:support@shipshape90.com?subject=ShipShape%2090%20Support">support@shipshape90.com</a>. Include the email on your account, the challenge name, and a short description of what happened. Never send a sign-in code.</p></section>
+    <section><h2>Account and sign-in</h2><h3>I didn’t receive my code.</h3><p>Check spam or junk, confirm the email address, wait a moment, and request a new code. Only the newest code may work.</p><h3>How do I update my profile?</h3><p>Open Profile and choose Edit profile to change your name, username, or photo.</p><h3>How do I delete my account?</h3><p>Open Profile, choose Delete account, review the challenge consequences, and type DELETE. This permanently removes the account and personal data described in our Privacy Policy.</p></section>
+    <section><h2>Challenges and scoring</h2><h3>Can I join two active challenges?</h3><p>No. ShipShape allows one active challenge. Switching immediately forfeits the current challenge. An upcoming challenge can be queued and will ask for permission before replacing an active challenge.</p><h3>Why did my score change?</h3><p>Points include completed tasks, missed-task penalties, perfect-day bonuses, and streak bonuses. Backfilled corrections recalculate the affected day and streak so rankings stay consistent.</p><h3>Can I update an earlier day?</h3><p>Use History inside the active challenge. You can edit challenge days that have happened, but not future dates, dates outside the challenge, or days before you joined.</p></section>
+    <section id="safety"><h2>Safety</h2><p>ShipShape 90 is not medical care and cannot evaluate whether a task is safe for you. Use appropriate form and intensity, respect recovery, and speak with a qualified healthcare professional before beginning a new program if you have concerns. Stop immediately for pain, dizziness, faintness, chest discomfort, unusual shortness of breath, or other alarming symptoms. Contact local emergency services for an emergency.</p></section>
+    <section><h2>Notifications</h2><p>Open Profile → Notifications to pause or resume ShipShape delivery. Use your iPhone settings to control banners, sounds, badges, and lock-screen visibility.</p></section>
+    <section><h2>Privacy or security concern</h2><p>Contact <a href="mailto:support@shipshape90.com?subject=Privacy%20or%20Security%20Concern">support@shipshape90.com</a> with enough detail for us to investigate. Do not include passwords, sign-in codes, or sensitive health information in email.</p></section>
+  </LegalShell>;
+}

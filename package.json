@@ -1,45 +1,20 @@
 {
   "name": "shipshape90",
-  "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev --turbopack",
-    "dev:webpack": "next dev",
-    "dev:clean": "node scripts/clean-next.mjs && next dev --turbopack",
-    "dev:clean:webpack": "node scripts/clean-next.mjs && next dev",
-    "dev:fix": "node scripts/free-dev-ports.mjs && node scripts/clean-next.mjs && next dev --turbopack",
-    "dev:fix:webpack": "node scripts/free-dev-ports.mjs && node scripts/clean-next.mjs && next dev",
-    "clean": "node scripts/clean-next.mjs",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
-    "clear-storage": "node scripts/clear-checkin-photos.mjs",
-    "reset-db": "node scripts/full-reset.mjs",
-    "db:bootstrap-file": "node scripts/concat-migrations.mjs"
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.3.0"
   },
-  "dependencies": {
-    "@supabase/ssr": "^0.6.1",
-    "@supabase/supabase-js": "^2.49.4",
-    "@tailwindcss/postcss": "^4.2.2",
-    "canvas-confetti": "^1.9.3",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
-    "framer-motion": "^12.6.3",
-    "lucide-react": "^0.483.0",
-    "next": "^15.3.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "tailwind-merge": "^3.0.2",
-    "tailwindcss": "^4.2.2"
+  "scripts": {
+    "dev:mobile": "pnpm --filter @shipshape/mobile start",
+    "dev:web": "pnpm --filter @shipshape/web dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint"
   },
   "devDependencies": {
-    "@types/canvas-confetti": "^1.9.0",
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0",
-    "eslint": "^9.24.0",
-    "eslint-config-next": "^15.3.0",
-    "typescript": "^5.8.3"
+    "supabase": "^2.111.0",
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10"
   }
 }
