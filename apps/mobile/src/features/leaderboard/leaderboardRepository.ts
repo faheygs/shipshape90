@@ -18,6 +18,14 @@ export interface ChallengeLeaderboardEntry {
   bonusMetric: ChallengeBonusMetric;
   bonusCalculation: ChallengeBonusCalculation;
   bonusPoints: number;
+  weightBonusCalculation: ChallengeBonusCalculation;
+  bodyFatBonusCalculation: ChallengeBonusCalculation;
+  weightBonusPoints: number;
+  bodyFatBonusPoints: number;
+  weightBaseline: number | null;
+  weightFinal: number | null;
+  bodyFatBaseline: number | null;
+  bodyFatFinal: number | null;
   totalScore: number;
   isCurrentUser: boolean;
 }
@@ -40,6 +48,14 @@ export async function listChallengeLeaderboard(challengeId: string): Promise<Cha
       bonusMetric: "none",
       bonusCalculation: null,
       bonusPoints: 0,
+      weightBonusCalculation: null,
+      bodyFatBonusCalculation: null,
+      weightBonusPoints: 0,
+      bodyFatBonusPoints: 0,
+      weightBaseline: null,
+      weightFinal: null,
+      bodyFatBaseline: null,
+      bodyFatFinal: null,
       totalScore: entry.score,
       isCurrentUser: Boolean(entry.isYou),
     }));
@@ -63,6 +79,14 @@ export async function listChallengeLeaderboard(challengeId: string): Promise<Cha
     bonusMetric: row.bonus_metric as ChallengeBonusMetric,
     bonusCalculation: row.bonus_calculation as ChallengeBonusCalculation,
     bonusPoints: Number(row.bonus_points),
+    weightBonusCalculation: row.weight_bonus_calculation as ChallengeBonusCalculation,
+    bodyFatBonusCalculation: row.body_fat_bonus_calculation as ChallengeBonusCalculation,
+    weightBonusPoints: Number(row.weight_bonus_points),
+    bodyFatBonusPoints: Number(row.body_fat_bonus_points),
+    weightBaseline: row.weight_baseline === null ? null : Number(row.weight_baseline),
+    weightFinal: row.weight_final === null ? null : Number(row.weight_final),
+    bodyFatBaseline: row.body_fat_baseline === null ? null : Number(row.body_fat_baseline),
+    bodyFatFinal: row.body_fat_final === null ? null : Number(row.body_fat_final),
     totalScore: Number(row.total_score),
     isCurrentUser: row.is_current_user,
   }));

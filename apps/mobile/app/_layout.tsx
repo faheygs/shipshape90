@@ -6,9 +6,14 @@ import { router, Stack, useRootNavigationState, useSegments, type Href } from "e
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { AppDialogProvider } from "@shipshape/ui-mobile";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { AuthProvider, useAuth } from "../src/features/auth/AuthProvider";
 import { Notifications, syncAppBadge, type NotificationResponse } from "../src/features/notifications/pushNotifications";
 import { useUnreadNotificationCount } from "../src/features/notifications/useNotifications";
+import { AppErrorBoundary } from "../src/components/AppErrorBoundary";
+import { AppRuntimeBridge } from "../src/components/AppRuntimeBridge";
+import { RealtimeBridge } from "../src/features/realtime/RealtimeBridge";
+import { Sentry } from "../src/lib/telemetry";
 
 function NotificationBridge() {
   const { profile } = useAuth();
@@ -52,30 +57,47 @@ function AuthGate() {
     }
 
     if (session && profile && (isPublicRoute || isProfileSetup || isIndex)) {
-      router.replace("/(tabs)/challenges");
+      router.replace("/(tabs)/home");
     }
   }, [isLoading, isPreview, navigationState?.key, profile, segments, session]);
 
   return null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+    defaultOptions: {
+      queries: {
+        staleTime: 30_000,
+        retry: (failureCount) => failureCount < 2,
+        retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+      },
+      mutations: { retry: false },
+    },
   }));
   const [loaded] = useFonts({ "DM Sans": DMSans_400Regular, "Bebas Neue": BebasNeue_400Regular });
   if (!loaded) return null;
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <AppDialogProvider>
-          <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }} />
-          <AuthGate />
-          <NotificationBridge />
-        </AppDialogProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    <AppErrorBoundary>
+      <KeyboardProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <AppDialogProvider>
+              <StatusBar style="dark" />
+              <Stack screenOptions={{ headerShown: false }} />
+              <AuthGate />
+              <NotificationBridge />
+              <RealtimeBridge />
+              <AppRuntimeBridge />
+            </AppDialogProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </KeyboardProvider>
+    </AppErrorBoundary>
   );
 }
+
+export default Sentry.wrap(RootLayout);

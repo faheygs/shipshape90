@@ -14,11 +14,21 @@ export default {
       .eq("status", "active");
     if (membershipError) return Response.json({ error: membershipError.message }, { status: 500 });
 
+    const { data: ownedChallenges, error: ownedChallengeError } = await context.supabase
+      .from("challenges")
+      .select("id")
+      .eq("owner_id", userId)
+      .in("status", ["registration", "active", "review"]);
+    if (ownedChallengeError) return Response.json({ error: ownedChallengeError.message }, { status: 500 });
+
     const capability: Record<string, string[]> = {
       [`user:${userId}:notifications`]: ["subscribe"],
     };
     for (const membership of memberships ?? []) {
       capability[`challenge:${membership.challenge_id}:*`] = ["subscribe"];
+    }
+    for (const challenge of ownedChallenges ?? []) {
+      capability[`challenge:${challenge.id}:*`] = ["subscribe"];
     }
 
     const ably = new Rest({ key: ablyApiKey });

@@ -2,10 +2,12 @@ import { Button, Icon, theme } from "@shipshape/ui-mobile";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../src/features/auth/AuthProvider";
 import { isProfileHandleAvailable, saveProfile, uploadProfileAvatar } from "../src/features/auth/authRepository";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
 
 type HandleStatus = "idle" | "checking" | "available" | "taken";
 
@@ -61,7 +63,7 @@ export default function ProfileSetupScreen() {
       const avatarPath = avatar ? await uploadProfileAvatar(avatar) : undefined;
       await saveProfile({ displayName: name, handle: normalized, avatarPath });
       await refreshProfile();
-      router.replace("/(tabs)/challenges");
+      router.replace("/(tabs)/home");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "We couldn't save your profile.";
       if (message.toLowerCase().includes("username") && message.toLowerCase().includes("taken")) setHandleStatus("taken");
@@ -81,8 +83,8 @@ export default function ProfileSetupScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <View style={styles.flex}>
+        <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.eyebrow}>ONE LAST THING</Text>
           <Text style={styles.title}>Make it yours.</Text>
           <Text style={styles.subtitle}>{"This is how you'll appear in challenges."}</Text>
@@ -131,9 +133,10 @@ export default function ProfileSetupScreen() {
           </View>
 
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-          <Button disabled={!valid} loading={loading} onPress={submit}>Explore challenges</Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+          <Button disabled={!valid} loading={loading} onPress={submit}>Go to home</Button>
+        </KeyboardAwareScrollView>
+      </View>
+      <AppKeyboardToolbar />
     </SafeAreaView>
   );
 }

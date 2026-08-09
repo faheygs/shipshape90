@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { communityKeys } from "../community/useCommunityActivity";
+import { challengeActivityKeys } from "../activity/useChallengeActivity";
 import { leaderboardKeys } from "../leaderboard/useChallengeLeaderboard";
 import { completeTodayTask, listTodayTasks, submitChallengeDay, type TodayTask } from "./taskRepository";
 
@@ -24,8 +24,7 @@ export function useSubmitChallengeDay(challengeId: string) {
         queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(challengeId) }),
         queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(challengeId) }),
         queryClient.invalidateQueries({ queryKey: leaderboardKeys.streak(challengeId) }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.all }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.challenge(challengeId) }),
+        queryClient.invalidateQueries({ queryKey: challengeActivityKeys.detail(challengeId) }),
       ]);
     },
   });
@@ -49,8 +48,7 @@ export function useCompleteTodayTask(challengeId: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(challengeId) }),
         queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(challengeId) }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.all }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.challenge(challengeId) }),
+        queryClient.invalidateQueries({ queryKey: challengeActivityKeys.detail(challengeId) }),
       ]);
     },
   });

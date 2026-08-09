@@ -1,56 +1,13 @@
 import { Icon, theme, type IconName } from "@shipshape/ui-mobile";
-import { useQueryClient } from "@tanstack/react-query";
 import { Tabs } from "expo-router";
-import * as Haptics from "expo-haptics";
-import { useEffect } from "react";
 import { StyleSheet } from "react-native";
-import { challengeKeys, useChallenges } from "../../src/features/challenges/useChallenges";
-import { useAuth } from "../../src/features/auth/AuthProvider";
-import { communityKeys } from "../../src/features/community/useCommunityActivity";
-import { leaderboardKeys } from "../../src/features/leaderboard/useChallengeLeaderboard";
-import { challengeHistoryKeys } from "../../src/features/history/useChallengeHistory";
-import { notificationKeys, useUnreadNotificationCount } from "../../src/features/notifications/useNotifications";
-import { closeRealtimeConnection, subscribeToChallenge, subscribeToUserNotifications } from "../../src/features/realtime/realtimeClient";
-import { todayTaskKeys } from "../../src/features/tasks/useTodayTasks";
+import { useUnreadNotificationCount } from "../../src/features/notifications/useNotifications";
 
 const icons: Record<string, IconName> = { home: "home", challenges: "challenges", create: "create", notifications: "bell", profile: "profile" };
 
 export default function TabLayout() {
-  const queryClient = useQueryClient();
-  const { profile } = useAuth();
-  const challenges = useChallenges();
   const unreadNotifications = useUnreadNotificationCount();
-  const activeChallengeId = challenges.data?.find((challenge) => challenge.membershipStatus === "active")?.id;
-
-  useEffect(() => {
-    if (!activeChallengeId) return;
-    let unsubscribe: () => void = () => undefined;
-    void subscribeToChallenge(activeChallengeId, () => {
-      void queryClient.invalidateQueries({ queryKey: challengeKeys.all });
-      void queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.summary });
-      void queryClient.invalidateQueries({ queryKey: communityKeys.all });
-      void queryClient.invalidateQueries({ queryKey: communityKeys.challenge(activeChallengeId) });
-      void queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(activeChallengeId) });
-      void queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(activeChallengeId) });
-    }).then((cleanup) => { unsubscribe = cleanup; });
-    return () => unsubscribe();
-  }, [activeChallengeId, queryClient]);
-
-  useEffect(() => {
-    if (!profile?.id) return;
-    let unsubscribe: () => void = () => undefined;
-    void subscribeToUserNotifications(profile.id, (event) => {
-      if (event.type === "challenge.queue_joined") closeRealtimeConnection();
-      void Haptics.notificationAsync(event.type.includes("declined") || event.type.includes("removed") || event.type.includes("failed") ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success);
-      void queryClient.invalidateQueries({ queryKey: challengeKeys.all });
-      void queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.summary });
-      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
-      void queryClient.invalidateQueries({ queryKey: ["challenge-management"] });
-    }).then((cleanup) => { unsubscribe = cleanup; });
-    return () => unsubscribe();
-  }, [activeChallengeId, profile?.id, queryClient]);
-
-  return <Tabs screenOptions={({ route }) => ({ headerShown: false, tabBarActiveTintColor: theme.colors.brand, tabBarInactiveTintColor: theme.colors.textMuted, tabBarStyle: styles.bar, tabBarLabelStyle: styles.label, tabBarIcon: ({ color, focused }) => <Icon name={icons[route.name] ?? "home"} color={color} size={route.name === "create" ? 26 : 22} strokeWidth={focused ? 2.35 : 1.8} /> })}>
+  return <Tabs initialRouteName="home" screenOptions={({ route }) => ({ headerShown: false, tabBarHideOnKeyboard: true, tabBarActiveTintColor: theme.colors.brand, tabBarInactiveTintColor: theme.colors.textMuted, tabBarStyle: styles.bar, tabBarLabelStyle: styles.label, tabBarIcon: ({ color, focused }) => <Icon name={icons[route.name] ?? "home"} color={color} size={route.name === "create" ? 26 : 22} strokeWidth={focused ? 2.35 : 1.8} /> })}>
     <Tabs.Screen name="home" options={{ title: "Home" }} />
     <Tabs.Screen name="challenges" options={{ title: "Challenges" }} />
     <Tabs.Screen name="create" options={{ title: "Create" }} />

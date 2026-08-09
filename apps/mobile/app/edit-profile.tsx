@@ -2,10 +2,12 @@ import { BackButton, Button, Icon, theme } from "@shipshape/ui-mobile";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../src/features/auth/AuthProvider";
 import { deleteProfileAvatar, getAvatarUrl, isProfileHandleAvailable, saveProfile, uploadProfileAvatar } from "../src/features/auth/authRepository";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
 
 type HandleStatus = "idle" | "checking" | "available" | "taken";
 
@@ -84,8 +86,8 @@ export default function EditProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <View style={styles.flex}>
+        <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <BackButton onPress={() => router.back()} />
           <View style={styles.heading}><Text style={styles.eyebrow}>EDIT PROFILE</Text><Text style={styles.title}>Make it yours.</Text><Text style={styles.subtitle}>Keep the identity people see across challenges up to date.</Text></View>
 
@@ -100,8 +102,9 @@ export default function EditProfileScreen() {
           <View style={styles.field}><Text style={styles.label}>USERNAME</Text><View style={[styles.handleInput, effectiveHandleStatus === "available" && styles.handleAvailable, effectiveHandleStatus === "taken" && styles.handleTaken]}><Text style={styles.at}>@</Text><TextInput value={normalized} onChangeText={(value) => { setHandle(value); setHandleStatus("idle"); setError(null); }} autoCapitalize="none" autoCorrect={false} maxLength={30} placeholder="username" placeholderTextColor={theme.colors.textMuted} returnKeyType="done" onSubmitEditing={submit} style={styles.handleText}/></View><Text style={[styles.hint, effectiveHandleStatus === "available" && styles.available, effectiveHandleStatus === "taken" && styles.taken]}>{handleHelp}</Text></View>
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <Button disabled={!valid} loading={loading} onPress={submit}>Save profile</Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
+      <AppKeyboardToolbar />
     </SafeAreaView>
   );
 }

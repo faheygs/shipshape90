@@ -10,6 +10,12 @@ declare
   challenge_four_id constant uuid := 'e1000000-0000-4000-8000-000000000201';
   challenge_three_id constant uuid := 'e1000000-0000-4000-8000-000000000202';
   challenge_twelve_id constant uuid := 'e1000000-0000-4000-8000-000000000203';
+  four_start_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000201';
+  four_final_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000202';
+  three_start_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000203';
+  three_final_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000204';
+  twelve_start_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000205';
+  twelve_final_checkpoint_id constant uuid := 'e2000000-0000-4000-8000-000000000206';
   member_four_membership uuid;
   competitor_membership uuid;
   member_three_membership uuid;
@@ -60,8 +66,8 @@ begin
     starts_on, ends_on, time_zone
   ) values
     (challenge_four_id, host_id, 'scoring-four-tasks', 'Four Tasks', '', 'public', 'active', local_day - 10, local_day + 10, 'UTC'),
-    (challenge_three_id, host_id, 'scoring-three-tasks', 'Three Tasks', '', 'public', 'active', local_day - 10, local_day + 10, 'UTC'),
-    (challenge_twelve_id, host_id, 'scoring-twelve-tasks', 'Twelve Tasks', '', 'public', 'active', local_day - 10, local_day + 10, 'UTC');
+    (challenge_three_id, host_id, 'scoring-three-tasks', 'Three Tasks', '', 'public', 'active', local_day - 10, local_day, 'UTC'),
+    (challenge_twelve_id, host_id, 'scoring-twelve-tasks', 'Twelve Tasks', '', 'public', 'active', local_day - 10, local_day, 'UTC');
 
   insert into public.task_definitions (
     challenge_id, rules_version, ordinal, title, instructions,
@@ -88,10 +94,23 @@ begin
   from generate_series(0, 11) task_number;
 
   insert into public.winner_rules (
-    challenge_id, rules_version, primary_metric, bonus_metric, bonus_calculation
+    challenge_id, rules_version, primary_metric, bonus_metric, bonus_calculation,
+    weight_bonus_calculation, body_fat_bonus_calculation
   ) values
-    (challenge_three_id, 1, 'total_points', 'weight', 'percentage'),
-    (challenge_twelve_id, 1, 'total_points', 'body_fat', 'total_change');
+    (challenge_four_id, 1, 'total_points', 'none', null, null, null),
+    (challenge_three_id, 1, 'total_points', 'weight', 'percentage', 'percentage', null),
+    (challenge_twelve_id, 1, 'total_points', 'weight', 'total_change', 'total_change', 'total_change');
+
+  insert into public.challenge_checkpoints (
+    id, challenge_id, rules_version, ordinal, checkpoint_kind, label, day_number,
+    requires_weight, requires_body_fat, requires_photo
+  ) values
+    (four_start_checkpoint_id, challenge_four_id, 1, 0, 'start', 'Start', 1, true, true, true),
+    (four_final_checkpoint_id, challenge_four_id, 1, 1, 'final', 'Final', 21, true, true, true),
+    (three_start_checkpoint_id, challenge_three_id, 1, 0, 'start', 'Start', 1, true, true, true),
+    (three_final_checkpoint_id, challenge_three_id, 1, 1, 'final', 'Final', 11, true, true, true),
+    (twelve_start_checkpoint_id, challenge_twelve_id, 1, 0, 'start', 'Start', 1, true, true, true),
+    (twelve_final_checkpoint_id, challenge_twelve_id, 1, 1, 'final', 'Final', 11, true, true, true);
 
   perform set_config('request.jwt.claim.sub', member_four_id::text, true);
   member_four_membership := public.join_challenge(challenge_four_id, null);
@@ -107,6 +126,28 @@ begin
   where occurrence.member_id = member_four_membership
     and occurrence.local_date = local_day;
   selected_ids := occurrence_ids[1:2];
+
+  begin
+    perform public.submit_challenge_day(challenge_four_id, local_day, selected_ids);
+    raise exception 'Submitting tasks before the required Start check-in should fail';
+  exception when others then
+    if sqlerrm not like '%required progress check-in%' then raise; end if;
+  end;
+
+  perform public.save_challenge_checkin(
+    four_start_checkpoint_id, 200, 25,
+    member_four_id::text || '/scoring/start.jpg', null
+  );
+
+  begin
+    perform public.save_challenge_checkin(
+      four_final_checkpoint_id, 190, 20,
+      member_four_id::text || '/scoring/final.jpg', null
+    );
+    raise exception 'A future Final check-in should not be accepted';
+  exception when others then
+    if sqlerrm not like '%not open yet%' then raise; end if;
+  end;
 
   select result.completed_count, result.awarded_points
   into completed, awarded
@@ -201,6 +242,10 @@ begin
   -- A competitor score is isolated and leaderboard totals update immediately.
   perform set_config('request.jwt.claim.sub', competitor_id::text, true);
   competitor_membership := public.join_challenge(challenge_four_id, null);
+  perform public.save_challenge_checkin(
+    four_start_checkpoint_id, 210, 28,
+    competitor_id::text || '/scoring/start.jpg', null
+  );
   perform public.list_today_tasks(challenge_four_id, local_day);
   select array_agg(occurrence.id order by task.ordinal)
   into occurrence_ids
@@ -225,6 +270,14 @@ begin
   update public.challenge_members
   set joined_at = ((local_day - 1)::timestamp + interval '12 hours') at time zone 'UTC'
   where id = member_three_membership;
+  perform public.save_challenge_checkin(
+    three_start_checkpoint_id, 200, 30,
+    member_three_id::text || '/scoring/start.jpg', null
+  );
+  perform public.save_challenge_checkin(
+    three_final_checkpoint_id, 190, 27,
+    member_three_id::text || '/scoring/final.jpg', null
+  );
   perform public.list_today_tasks(challenge_three_id, local_day);
   select array_agg(occurrence.id order by task.ordinal)
   into occurrence_ids
@@ -238,12 +291,6 @@ begin
   if completed <> 3 or awarded <> 4 then
     raise exception 'Three-task perfect day must score 4, got completed %, points %', completed, awarded;
   end if;
-
-  insert into public.body_logs (
-    profile_id, challenge_id, logged_on, weight
-  ) values
-    (member_three_id, challenge_three_id, local_day - 1, 200),
-    (member_three_id, challenge_three_id, local_day, 190);
 
   if not exists (
     select 1 from public.list_challenge_leaderboard(challenge_three_id) board
@@ -281,6 +328,14 @@ begin
   -- Twelve-task perfect day: 12 base + 5 dynamic perfect bonus = 17.
   perform set_config('request.jwt.claim.sub', member_twelve_id::text, true);
   member_twelve_membership := public.join_challenge(challenge_twelve_id, null);
+  perform public.save_challenge_checkin(
+    twelve_start_checkpoint_id, 220, 30,
+    member_twelve_id::text || '/scoring/start.jpg', null
+  );
+  perform public.save_challenge_checkin(
+    twelve_final_checkpoint_id, 210, 27.5,
+    member_twelve_id::text || '/scoring/final.jpg', null
+  );
   perform public.list_today_tasks(challenge_twelve_id, local_day);
   select array_agg(occurrence.id order by task.ordinal)
   into occurrence_ids
@@ -295,23 +350,21 @@ begin
     raise exception 'Twelve-task perfect day must score 17, got completed %, points %', completed, awarded;
   end if;
 
-  insert into public.body_logs (
-    profile_id, challenge_id, logged_on, body_fat_percentage
-  ) values
-    (member_twelve_id, challenge_twelve_id, local_day - 1, 30),
-    (member_twelve_id, challenge_twelve_id, local_day, 27.5);
-
   if not exists (
     select 1 from public.list_challenge_leaderboard(challenge_twelve_id) board
     where board.profile_id = member_twelve_id
       and board.total_points = 17
-      and board.bonus_metric = 'body_fat'
-      and board.bonus_calculation = 'total_change'
-      and board.baseline_value = 30
-      and board.latest_value = 27.5
-      and board.bonus_points = 2.5
-      and board.total_score = 19.5
-  ) then raise exception 'Body-fat total-change bonus did not add 2.5 to the 17-point ShipShape score'; end if;
+      and board.weight_bonus_calculation = 'total_change'
+      and board.body_fat_bonus_calculation = 'total_change'
+      and board.weight_baseline = 220
+      and board.weight_final = 210
+      and board.body_fat_baseline = 30
+      and board.body_fat_final = 27.5
+      and board.weight_bonus_points = 10
+      and board.body_fat_bonus_points = 2.5
+      and board.bonus_points = 12.5
+      and board.total_score = 29.5
+  ) then raise exception 'Dual end-of-challenge bonuses did not add 12.5 to the 17-point ShipShape score'; end if;
 end;
 $$;
 

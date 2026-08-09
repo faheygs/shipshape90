@@ -1,9 +1,10 @@
 import { Icon, ProgressRing, theme } from "@shipshape/ui-mobile";
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChallengeHistoryCard } from "../../src/components/ChallengeHistoryCard";
 import { useAuth } from "../../src/features/auth/AuthProvider";
+import { getAvatarUrl } from "../../src/features/auth/authRepository";
 import { useChallenges } from "../../src/features/challenges/useChallenges";
 import { useMyChallengeHistory } from "../../src/features/history/useChallengeHistory";
 import { useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
@@ -25,6 +26,7 @@ export default function HomeScreen() {
   const { profile } = useAuth();
   const challenges = useChallenges();
   const active = challenges.data?.find((challenge) => challenge.membershipStatus === "active");
+  const hosted = (challenges.data ?? []).filter((challenge) => challenge.isOwner && !["complete", "archived"].includes(challenge.challengeStatus));
   const next = challenges.data?.find((challenge) => challenge.isQueued)
     ?? challenges.data?.find((challenge) => challenge.isSaved && challenge.membershipStatus === "none" && challenge.startsOn > localDateKey());
   const today = useTodayTasks(active?.id ?? "");
@@ -36,6 +38,7 @@ export default function HomeScreen() {
   const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const me = leaderboard.data?.find((entry) => entry.isCurrentUser);
   const initials = profile?.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SS";
+  const avatarUrl = getAvatarUrl(profile?.avatarPath ?? null);
   const past = history.data ?? [];
   const allTimePoints = past.reduce((sum, item) => sum + item.totalPoints, 0) + (me?.totalPoints ?? 0);
   const allTimePerfectDays = past.reduce((sum, item) => sum + item.perfectDays, 0) + (me?.perfectDays ?? 0);
@@ -48,12 +51,22 @@ export default function HomeScreen() {
             <Text style={styles.eyebrow}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</Text>
             <Text style={styles.title}>{greeting()}</Text>
           </View>
-          <View style={styles.avatar}><Text style={styles.avatarText}>{initials}</Text></View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open your profile"
+            hitSlop={8}
+            onPress={() => router.push("/(tabs)/profile")}
+            style={({ pressed }) => [styles.avatarButton, pressed && styles.avatarPressed]}
+          >
+            {avatarUrl
+              ? <Image accessibilityIgnoresInvertColors source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              : <View style={styles.avatarFallback}><Text style={styles.avatarText}>{initials}</Text></View>}
+          </Pressable>
         </View>
 
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today</Text>{active ? <Text style={styles.sectionMeta}>LIVE</Text> : null}</View>
         {active ? (
-          <Pressable accessibilityRole="button" onPress={() => router.push(`/challenge/${active.id}`)} style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Open ${active.name}. ${done} of ${tasks.length} tasks complete. ${me?.totalPoints ?? 0} points.`} onPress={() => router.push(`/challenge/${active.id}`)} style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}>
             <View style={styles.activeTop}><View style={styles.livePill}><View style={styles.liveDot}/><Text style={styles.liveText}>ACTIVE CHALLENGE</Text></View><Icon name="arrow-right" color={theme.colors.brandStrong}/></View>
             <Text style={styles.challengeTitle}>{active.name}</Text>
             <View style={styles.performanceStrip}>
@@ -78,11 +91,20 @@ export default function HomeScreen() {
             <View style={styles.openRow}><Text style={styles.openText}>OPEN TODAY’S TASKS</Text><View style={styles.openIcon}><Icon name="arrow-right" size={18} color={theme.colors.brandStrong}/></View></View>
           </Pressable>
         ) : (
-          <Pressable accessibilityRole="button" onPress={() => router.push("/(tabs)/challenges")} style={({ pressed }) => [styles.noChallenge, pressed && styles.pressed]}><View style={styles.noChallengeCopy}><Text style={styles.noChallengeEyebrow}>READY WHEN YOU ARE</Text><Text style={styles.noChallengeTitle}>Find your next challenge</Text><Text style={styles.noChallengeBody}>Choose one commitment and make it count.</Text></View><Icon name="arrow-right" color={theme.colors.brandStrong}/></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Explore challenges" onPress={() => router.push("/(tabs)/challenges")} style={({ pressed }) => [styles.noChallenge, pressed && styles.pressed]}><View style={styles.noChallengeCopy}><Text style={styles.noChallengeEyebrow}>READY WHEN YOU ARE</Text><Text style={styles.noChallengeTitle}>Find your next challenge</Text><Text style={styles.noChallengeBody}>Choose one commitment and make it count.</Text></View><Icon name="arrow-right" color={theme.colors.brandStrong}/></Pressable>
         )}
 
+        {hosted.length ? <View style={styles.hostSection}>
+          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Hosting</Text><Text style={styles.sectionMeta}>{hosted.length} {hosted.length === 1 ? "CHALLENGE" : "CHALLENGES"}</Text></View>
+          <View style={styles.hostList}>{hosted.map((challenge) => <Pressable key={challenge.id} accessibilityRole="button" accessibilityLabel={`Open host controls for ${challenge.name}`} onPress={() => router.push(`/manage-challenge/${challenge.id}`)} style={({ pressed }) => [styles.hostCard, pressed && styles.pressed]}>
+            <View style={styles.hostIcon}><Icon name="trophy" size={21} color={theme.colors.brandStrong}/></View>
+            <View style={styles.hostCopy}><Text numberOfLines={1} style={styles.hostTitle}>{challenge.name}</Text><Text style={styles.hostMeta}>{challenge.challengeStatus === "registration" ? `Starts ${shortDate(challenge.startsOn)}` : challenge.challengeStatus.toUpperCase()} · {challenge.participantCount} participants</Text></View>
+            <View style={styles.hostAction}><Text style={styles.hostActionText}>HOST</Text><Icon name="arrow-right" size={16} color={theme.colors.brandStrong}/></View>
+          </Pressable>)}</View>
+        </View> : null}
+
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Your run</Text><Text style={styles.sectionMeta}>ALL TIME</Text></View>
-        <Pressable accessibilityRole="button" onPress={() => router.push("/history")} style={({ pressed }) => [styles.runCard, pressed && styles.pressed]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Open challenge history. ${allTimePoints} all-time points, ${allTimePerfectDays} perfect days, ${past.length} finished challenges.`} onPress={() => router.push("/history")} style={({ pressed }) => [styles.runCard, pressed && styles.pressed]}>
           <View style={styles.runStats}>
             <View style={styles.runStat}><Text style={styles.runValue}>{allTimePoints}</Text><Text style={styles.runLabel}>POINTS</Text></View>
             <View style={styles.runDivider}/>
@@ -95,7 +117,7 @@ export default function HomeScreen() {
 
         {next ? <View style={styles.nextSection}>
           <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Up next</Text><Text style={styles.sectionMeta}>{next.isQueued ? "QUEUED" : "SAVED"}</Text></View>
-          <Pressable accessibilityRole="button" onPress={() => router.push(`/challenge-detail/${next.id}`)} style={({ pressed }) => [styles.nextCard, pressed && styles.pressed]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Open ${next.name}. ${next.isQueued ? "Queued to auto-join" : "Saved"}. Starts ${shortDate(next.startsOn)}.`} onPress={() => router.push(`/challenge-detail/${next.id}`)} style={({ pressed }) => [styles.nextCard, pressed && styles.pressed]}>
             <View style={styles.nextIcon}><Icon name={next.isQueued ? "calendar" : "heart"} filled={!next.isQueued} color={theme.colors.brandStrong}/></View>
             <View style={styles.nextCopy}><Text style={styles.nextTitle}>{next.name}</Text><Text style={styles.nextMeta}>{next.isQueued ? "Auto-joins" : "Starts"} {shortDate(next.startsOn)}</Text></View>
             <Icon name="arrow-right" color={theme.colors.textSecondary}/>
@@ -118,7 +140,10 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1 },
   eyebrow: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "800", fontSize: 10, letterSpacing: 1.4 },
   title: { color: theme.colors.text, fontFamily: theme.type.display, fontSize: 42, lineHeight: 46, letterSpacing: 1.1 },
-  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.brand },
+  avatarButton: { width: 48, height: 48, padding: 2, borderRadius: 24, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 21, backgroundColor: theme.colors.brandSoft },
+  avatarFallback: { flex: 1, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.brand },
+  avatarPressed: { opacity: .78, transform: [{ scale: .96 }] },
   avatarText: { color: "#fff", fontFamily: theme.type.body, fontWeight: "800" },
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 19 },
@@ -153,6 +178,15 @@ const styles = StyleSheet.create({
   noChallengeEyebrow: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: 1 },
   noChallengeTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 18 },
   noChallengeBody: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 13 },
+  hostSection: { gap: 12 },
+  hostList: { gap: 10 },
+  hostCard: { minHeight: 82, flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 20, borderWidth: 1, borderColor: theme.colors.brand, backgroundColor: theme.colors.surface },
+  hostIcon: { width: 46, height: 46, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.brandSoft },
+  hostCopy: { flex: 1, gap: 3 },
+  hostTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 15 },
+  hostMeta: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 10 },
+  hostAction: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 9, paddingVertical: 7, borderRadius: 11, backgroundColor: theme.colors.brandSoft },
+  hostActionText: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: .8 },
   runCard: { padding: 17, borderRadius: 22, backgroundColor: theme.colors.brandStrong, gap: 16 },
   runStats: { minHeight: 66, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: "#FFFFFF14" },
   runStat: { flex: 1, alignItems: "center", gap: 2 },

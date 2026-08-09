@@ -25,11 +25,11 @@ docs/           Product, data, design, and operational documentation
 
 - Mobile: Expo, React Native, Expo Router, TypeScript.
 - Web/admin: Next.js App Router, React, TypeScript.
-- Data synchronization: TanStack Query.
-- Forms and validation: React Hook Form and Zod.
-- Local client state: small Zustand stores only for transient UI state.
+- Data synchronization and server cache: TanStack Query.
+- Forms and validation: focused screen hooks, pure TypeScript validation models, and authoritative database RPC validation.
+- Local client state: React state for transient UI; server-owned data stays in TanStack Query.
 - Backend: Supabase Postgres, Auth, Storage, Edge Functions, Row-Level Security, and server functions.
-- Realtime delivery: Ably private channels behind a provider adapter; Postgres remains authoritative.
+- Realtime delivery: transactional Postgres outbox to Ably private channels; Postgres remains authoritative and TanStack Query refetches the affected read models.
 - Mobile subscriptions: RevenueCat when paid plans are introduced.
 - Web billing: Stripe when paid plans are introduced.
 - Product analytics: PostHog with a documented event taxonomy.
@@ -46,7 +46,7 @@ docs/           Product, data, design, and operational documentation
 - Rules: task catalog, task schedules, checkpoints, scoring, and tie-breakers.
 - Participation: exclusive membership, daily task instances, check-ins, evidence, reviews, and withdrawal.
 - Competition: points ledger, streaks, leaderboard snapshots, final results.
-- Social: activity entries, comments, reactions, moderation reports.
+- Activity: per-challenge system events. Broader community/social features are deferred beyond V1.
 - Notifications: in-app, push, and transactional email preferences.
 
 ## Core persistence model
@@ -80,13 +80,15 @@ docs/           Product, data, design, and operational documentation
 
 - Scoring is ledger-based and append-only. Totals are projections, never the source of truth.
 - Published challenge rules are versioned and immutable after start unless participants consent to a new version.
-- Task occurrences are materialized from schedules in the challenge time zone and rendered in each member's local time.
+- Daily participation is keyed to each member's stored IANA time zone, so task days and midnight boundaries are local to the participant.
 - Idempotency keys protect check-ins, scoring events, notifications, and scheduled jobs.
 - Row-Level Security isolates private challenges, memberships, evidence, and photos.
 - A partial unique index permits only one pending or active membership per profile.
 - Membership lifecycle triggers make prize forfeiture irreversible and prevent same-challenge rejoining after withdrawal.
 - Durable domain events are written to a transactional outbox before realtime fan-out.
-- Evidence uses signed URLs; storage buckets are private by default.
+- A root mobile realtime bridge owns one subscription per eligible challenge plus one private user-notification subscription, deduplicates event IDs, and invalidates only affected query families.
+- The outbox trigger requests delivery immediately after commit; the scheduled relay is recovery for undelivered rows, not the normal realtime path.
+- Avatars and private progress photos use scoped storage policies; private progress media is served with signed URLs.
 - Administrative operations run through privileged server functions, never a service key in clients.
 - The rules engine is a pure TypeScript package shared by server tests and client previews.
 - Leaderboards are rebuilt from the score ledger and periodically snapshotted for fast reads.
@@ -99,4 +101,4 @@ docs/           Product, data, design, and operational documentation
 - Component tests for design-system states and accessibility labels.
 - Maestro coverage for account creation, joining, daily completion, and challenge creation.
 - Playwright coverage for marketing, account, and admin flows.
-- Type checking, linting, tests, and migration validation required in CI.
+- Type checking, unit tests, and the production web build run in CI. Linting, migration parity, and linked database linting are release checks.

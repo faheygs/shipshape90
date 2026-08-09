@@ -1,9 +1,11 @@
 import { BackButton, Button, theme } from "@shipshape/ui-mobile";
 import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getCurrentProfile, requestOtp, verifyOtp } from "../src/features/auth/authRepository";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
 
 export default function VerifyScreen() {
   const params = useLocalSearchParams<{ value: string }>();
@@ -29,7 +31,7 @@ export default function VerifyScreen() {
     try {
       await verifyOtp({ kind: "email", value: params.value }, code);
       const profile = await getCurrentProfile();
-      router.replace(profile ? "/(tabs)/challenges" : "/profile-setup");
+      router.replace(profile ? "/(tabs)/home" : "/profile-setup");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That code didn't work.");
     } finally {
@@ -62,8 +64,8 @@ export default function VerifyScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <View style={styles.flex}>
+        <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <BackButton onPress={() => router.back()} />
           <View style={styles.copy}>
             <Text style={styles.eyebrow}>CHECK YOUR EMAIL</Text>
@@ -93,8 +95,9 @@ export default function VerifyScreen() {
             {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
           </Button>
           <Button variant="ghost" onPress={() => router.back()}>Use a different email</Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
+      <AppKeyboardToolbar />
     </SafeAreaView>
   );
 }

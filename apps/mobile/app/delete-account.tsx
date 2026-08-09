@@ -1,10 +1,12 @@
 import { BackButton, Button, Icon, theme } from "@shipshape/ui-mobile";
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../src/features/auth/AuthProvider";
 import { useChallenges } from "../src/features/challenges/useChallenges";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
 
 export default function DeleteAccountScreen() {
   const { deleteAccount } = useAuth();
@@ -32,8 +34,8 @@ export default function DeleteAccountScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <View style={styles.flex}>
+        <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <BackButton onPress={() => router.back()} />
           <View style={styles.heading}><Text style={styles.eyebrow}>DELETE ACCOUNT</Text><Text style={styles.title}>This ends your run.</Text><Text style={styles.subtitle}>This is permanent and cannot be undone.</Text></View>
           <View style={styles.warning}><View style={styles.warningIcon}><Icon name="alert" color={theme.colors.danger}/></View><View style={styles.warningCopy}><Text style={styles.warningTitle}>What happens next</Text><Text style={styles.warningBody}>Your login, profile, photos, progress logs, notifications, and personal challenge records are permanently removed.</Text></View></View>
@@ -43,8 +45,9 @@ export default function DeleteAccountScreen() {
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <Button variant="danger" disabled={confirmation !== "DELETE" || challenges.isLoading} loading={loading} onPress={remove}>Permanently delete account</Button>
           <Button variant="secondary" disabled={loading} onPress={() => router.back()}>Keep my account</Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
+      <AppKeyboardToolbar />
     </SafeAreaView>
   );
 }

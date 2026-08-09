@@ -248,6 +248,14 @@ otp_expiry = 3600
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
+[auth.email.template.confirmation]
+subject = "{{ .Token }} is your ShipShape 90 code"
+content_path = "./supabase/templates/email-otp.html"
+
+[auth.email.template.magic_link]
+subject = "{{ .Token }} is your ShipShape 90 code"
+content_path = "./supabase/templates/email-otp.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true

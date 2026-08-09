@@ -24,11 +24,11 @@ interface TodayTaskRow {
 }
 
 const demoTasks: TodayTask[] = [
-  { occurrenceId: "demo-workout", taskDefinitionId: "demo-workout", title: "Workout 1", meta: "45 minutes · Photo optional", points: 1, proofPolicy: "optional", status: "pending" },
+  { occurrenceId: "demo-workout", taskDefinitionId: "demo-workout", title: "Workout 1", meta: "45 minutes", points: 1, proofPolicy: "none", status: "pending" },
   { occurrenceId: "demo-water", taskDefinitionId: "demo-water", title: "Drink 100 oz water", meta: "Track throughout the day", points: 1, proofPolicy: "none", status: "complete" },
-  { occurrenceId: "demo-steps", taskDefinitionId: "demo-steps", title: "Reach 10,000 steps", meta: "Daily target", points: 1, proofPolicy: "optional", status: "pending" },
-  { occurrenceId: "demo-read", taskDefinitionId: "demo-read", title: "Read 10 pages", meta: "Personal development", points: 1, proofPolicy: "optional", status: "complete" },
-  { occurrenceId: "demo-journal", taskDefinitionId: "demo-journal", title: "Daily journal", meta: "Write a short reflection", points: 1, proofPolicy: "optional", status: "pending" },
+  { occurrenceId: "demo-steps", taskDefinitionId: "demo-steps", title: "Reach 10,000 steps", meta: "Daily target", points: 1, proofPolicy: "none", status: "pending" },
+  { occurrenceId: "demo-read", taskDefinitionId: "demo-read", title: "Read 10 pages", meta: "Personal development", points: 1, proofPolicy: "none", status: "complete" },
+  { occurrenceId: "demo-journal", taskDefinitionId: "demo-journal", title: "Daily journal", meta: "Write a short reflection", points: 1, proofPolicy: "none", status: "pending" },
 ];
 
 function localDate(): string {
@@ -46,15 +46,14 @@ export async function listTodayTasks(challengeId: string): Promise<TodayTask[]> 
   if (error) throw error;
   return ((data ?? []) as TodayTaskRow[]).map((row) => {
     const target = row.target_value == null ? "" : `${row.target_value}${row.unit ? ` ${row.unit}` : ""}`;
-    const proof = row.proof_policy === "required" ? "Proof required" : row.proof_policy === "optional" ? "Proof optional" : "";
     return {
       occurrenceId: row.occurrence_id,
       taskDefinitionId: row.task_definition_id,
       title: row.title,
-      meta: [target, row.instructions, proof].filter(Boolean).join(" · "),
+      meta: [target, row.instructions].filter(Boolean).join(" · "),
       points: row.points,
       proofPolicy: row.proof_policy,
-      status: row.status,
+      status: row.status === "pending_review" ? "complete" : row.status,
     };
   });
 }

@@ -1098,7 +1098,41 @@ export type Database = {
           checkin_id: string
         }[]
       }
+      create_challenge: {
+        Args: {
+          challenge_body_fat_bonus_calculation: string | null
+          challenge_description: string
+          challenge_ends_on: string
+          challenge_join_policy: string
+          challenge_name: string
+          challenge_reward: string
+          challenge_starts_on: string
+          challenge_visibility: Database["public"]["Enums"]["challenge_visibility"]
+          challenge_weight_bonus_calculation: string | null
+          configured_checkpoints: Json
+          configured_tasks: Json
+          creator_allow_switch?: boolean
+          replace_existing_queue?: boolean
+        }
+        Returns: Json
+      }
       create_challenge_draft:
+        | {
+            Args: {
+              challenge_body_fat_bonus_calculation: string | null
+              challenge_description: string
+              challenge_ends_on: string
+              challenge_join_policy: string
+              challenge_name: string
+              challenge_reward: string
+              challenge_starts_on: string
+              challenge_visibility: Database["public"]["Enums"]["challenge_visibility"]
+              challenge_weight_bonus_calculation: string | null
+              configured_checkpoints: Json
+              configured_tasks: Json
+            }
+            Returns: string
+          }
         | {
             Args: {
               challenge_bonus_calculation: string
@@ -1290,6 +1324,35 @@ export type Database = {
           scoring_method: string
           total_points: number
           total_score: number
+          weight_bonus_calculation: string | null
+          body_fat_bonus_calculation: string | null
+          weight_bonus_points: number
+          body_fat_bonus_points: number
+          weight_baseline: number | null
+          weight_final: number | null
+          body_fat_baseline: number | null
+          body_fat_final: number | null
+        }[]
+      }
+      list_my_challenge_checkpoints: {
+        Args: { target_challenge_id: string }
+        Returns: {
+          body_fat_percentage: number | null
+          body_log_id: string | null
+          can_complete: boolean
+          checkpoint_id: string
+          checkpoint_kind: string
+          completed_at: string | null
+          day_number: number
+          is_blocking: boolean
+          is_due: boolean
+          label: string
+          photo_path: string | null
+          requires_body_fat: boolean
+          requires_photo: boolean
+          requires_weight: boolean
+          scheduled_on: string
+          weight: number | null
         }[]
       }
       list_challenge_tasks: {
@@ -1354,14 +1417,16 @@ export type Database = {
         Returns: {
           bonus_calculation: string
           bonus_metric: string
+          body_fat_bonus_calculation: string | null
           category: string
           challenge_status: string
           cover_path: string
           description: string
           ends_on: string
           id: string
-          is_owner: boolean
-          is_queued: boolean
+           is_owner: boolean
+           join_request_status: string | null
+           is_queued: boolean
           is_saved: boolean
           join_policy: string
           membership_status: string
@@ -1373,6 +1438,7 @@ export type Database = {
           slug: string
           starts_on: string
           visibility: Database["public"]["Enums"]["challenge_visibility"]
+          weight_bonus_calculation: string | null
         }[]
       }
       list_my_challenge_history: {
@@ -1473,9 +1539,10 @@ export type Database = {
         Args: { submitted_invite_code: string }
         Returns: {
           bonus_calculation: string
-          bonus_metric: string
-          category: string
-          challenge_id: string
+           bonus_metric: string
+           category: string
+           challenge_id: string
+           challenge_status: string
           cover_path: string
           description: string
           ends_on: string
@@ -1506,17 +1573,41 @@ export type Database = {
         }
         Returns: undefined
       }
+      replace_challenge_queue: {
+        Args: {
+          allow_switch_at_start?: boolean
+          target_challenge_id: string
+        }
+        Returns: boolean
+      }
       remove_challenge_member: {
         Args: { target_challenge_id: string; target_member_id: string }
         Returns: string
       }
-      review_challenge_join_request: {
+      save_challenge_checkin: {
         Args: {
-          approve_request: boolean
-          target_challenge_id: string
-          target_member_id: string
+          log_body_fat_percentage?: number
+          log_note?: string
+          log_photo_path?: string
+          log_weight?: number
+          target_checkpoint_id: string
         }
-        Returns: Database["public"]["Enums"]["member_status"]
+        Returns: string
+      }
+      review_challenge_join_request: {
+         Args: {
+           approve_request: boolean
+           target_challenge_id: string
+           target_member_id: string
+         }
+         Returns: Database["public"]["Enums"]["member_status"]
+       }
+      request_private_challenge_join: {
+        Args: {
+          submitted_invite_code?: string | null
+          target_challenge_id: string
+        }
+        Returns: string
       }
       revoke_challenge_invite: {
         Args: { target_invite_id: string }

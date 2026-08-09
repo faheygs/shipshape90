@@ -1,10 +1,9 @@
 import { BackButton, Button, Icon, theme, useAppDialog, type IconName } from "@shipshape/ui-mobile";
 import { router, useFocusEffect, type Href } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { AppNotification } from "../src/features/notifications/notificationRepository";
-import { enablePushNotifications, notificationsAreEnabled } from "../src/features/notifications/pushNotifications";
 import { useClearNotifications, useDeleteNotification, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from "../src/features/notifications/useNotifications";
 
 const iconFor = (type: string): IconName => {
@@ -64,30 +63,14 @@ export function NotificationsScreen({ showBackButton = true }: { showBackButton?
   const markAllRead = markAll.mutate;
   const deleteOne = useDeleteNotification();
   const clearAll = useClearNotifications();
-  const [pushEnabled, setPushEnabled] = useState<boolean | null>(null);
-  const [enablingPush, setEnablingPush] = useState(false);
   const items = notifications.data ?? [];
   const unread = items.filter((item) => !item.readAt).length;
 
-  useEffect(() => { void notificationsAreEnabled().then(setPushEnabled).catch(() => setPushEnabled(false)); }, []);
   useFocusEffect(useCallback(() => { markAllRead(); }, [markAllRead]));
 
   const openNotification = (item: AppNotification) => {
     if (!item.readAt) markOne.mutate(item.id);
     if (item.actionPath) router.push(item.actionPath as Href);
-  };
-
-  const enablePush = async () => {
-    setEnablingPush(true);
-    try {
-      await enablePushNotifications();
-      setPushEnabled(true);
-      showDialog({ icon: "check", eyebrow: "NOTIFICATIONS ON", title: "You won’t miss the move.", message: "Challenge requests and important updates can now reach this phone." });
-    } catch (error) {
-      showDialog({ icon: "alert", title: "Notifications stayed off.", message: error instanceof Error ? error.message : "Please try again." });
-    } finally {
-      setEnablingPush(false);
-    }
   };
 
   const confirmClearAll = () => showDialog({
@@ -104,7 +87,6 @@ export function NotificationsScreen({ showBackButton = true }: { showBackButton?
   return <SafeAreaView style={styles.safe}>
     <View style={styles.header}>{showBackButton ? <BackButton onPress={() => router.back()}/> : null}<View style={styles.headerCopy}><Text style={styles.eyebrow}>INBOX</Text><Text style={styles.headerTitle}>Notifications</Text></View>{items.length ? <Button size="sm" variant="secondary" loading={clearAll.isPending} onPress={confirmClearAll}>Clear all</Button> : <View style={styles.headerSpacer}/>}</View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      {pushEnabled === false ? <View style={styles.pushCard}><View style={styles.pushIcon}><Icon name="bell" color={theme.colors.brandStrong}/></View><View style={styles.pushCopy}><Text style={styles.pushEyebrow}>STAY IN THE GAME</Text><Text style={styles.pushTitle}>Get important updates</Text><Text style={styles.pushBody}>Know when someone requests access, when you’re approved, or when a queued challenge starts.</Text></View><Button loading={enablingPush} onPress={() => void enablePush()}>Turn on notifications</Button></View> : null}
       <View style={styles.sectionRow}><Text style={styles.sectionTitle}>{unread ? `${unread} new` : "You’re caught up"}</Text><Text style={styles.sectionMeta}>{items.length} TOTAL</Text></View>
       {notifications.isLoading ? <View style={styles.empty}><Text style={styles.emptyTitle}>Loading updates…</Text></View> : null}
       {!notifications.isLoading && !items.length ? <View style={styles.empty}><View style={styles.emptyIcon}><Icon name="bell" size={28} color={theme.colors.brandStrong}/></View><Text style={styles.emptyTitle}>Nothing here yet.</Text><Text style={styles.emptyBody}>Important challenge updates will land here as they happen.</Text></View> : null}
