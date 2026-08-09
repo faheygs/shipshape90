@@ -1,9 +1,10 @@
 import { Icon, ProgressRing, theme } from "@shipshape/ui-mobile";
 import { router } from "expo-router";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChallengeHistoryCard } from "../../src/components/ChallengeHistoryCard";
 import { useAuth } from "../../src/features/auth/AuthProvider";
+import { getAvatarUrl } from "../../src/features/auth/authRepository";
 import { useChallenges } from "../../src/features/challenges/useChallenges";
 import { useMyChallengeHistory } from "../../src/features/history/useChallengeHistory";
 import { useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
@@ -37,6 +38,7 @@ export default function HomeScreen() {
   const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const me = leaderboard.data?.find((entry) => entry.isCurrentUser);
   const initials = profile?.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SS";
+  const avatarUrl = getAvatarUrl(profile?.avatarPath ?? null);
   const past = history.data ?? [];
   const allTimePoints = past.reduce((sum, item) => sum + item.totalPoints, 0) + (me?.totalPoints ?? 0);
   const allTimePerfectDays = past.reduce((sum, item) => sum + item.perfectDays, 0) + (me?.perfectDays ?? 0);
@@ -49,7 +51,17 @@ export default function HomeScreen() {
             <Text style={styles.eyebrow}>{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</Text>
             <Text style={styles.title}>{greeting()}</Text>
           </View>
-          <View style={styles.avatar}><Text style={styles.avatarText}>{initials}</Text></View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open your profile"
+            hitSlop={8}
+            onPress={() => router.push("/(tabs)/profile")}
+            style={({ pressed }) => [styles.avatarButton, pressed && styles.avatarPressed]}
+          >
+            {avatarUrl
+              ? <Image accessibilityIgnoresInvertColors source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              : <View style={styles.avatarFallback}><Text style={styles.avatarText}>{initials}</Text></View>}
+          </Pressable>
         </View>
 
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today</Text>{active ? <Text style={styles.sectionMeta}>LIVE</Text> : null}</View>
@@ -128,7 +140,10 @@ const styles = StyleSheet.create({
   headerCopy: { flex: 1 },
   eyebrow: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "800", fontSize: 10, letterSpacing: 1.4 },
   title: { color: theme.colors.text, fontFamily: theme.type.display, fontSize: 42, lineHeight: 46, letterSpacing: 1.1 },
-  avatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.brand },
+  avatarButton: { width: 48, height: 48, padding: 2, borderRadius: 24, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  avatarImage: { width: "100%", height: "100%", borderRadius: 21, backgroundColor: theme.colors.brandSoft },
+  avatarFallback: { flex: 1, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.brand },
+  avatarPressed: { opacity: .78, transform: [{ scale: .96 }] },
   avatarText: { color: "#fff", fontFamily: theme.type.body, fontWeight: "800" },
   sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 19 },
