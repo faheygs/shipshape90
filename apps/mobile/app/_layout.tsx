@@ -12,6 +12,7 @@ import { Notifications, syncAppBadge, type NotificationResponse } from "../src/f
 import { useUnreadNotificationCount } from "../src/features/notifications/useNotifications";
 import { AppErrorBoundary } from "../src/components/AppErrorBoundary";
 import { AppRuntimeBridge } from "../src/components/AppRuntimeBridge";
+import { RealtimeBridge } from "../src/features/realtime/RealtimeBridge";
 import { Sentry } from "../src/lib/telemetry";
 
 function NotificationBridge() {
@@ -89,6 +90,7 @@ function RootLayout() {
               <Stack screenOptions={{ headerShown: false }} />
               <AuthGate />
               <NotificationBridge />
+              <RealtimeBridge />
               <AppRuntimeBridge />
             </AppDialogProvider>
           </AuthProvider>

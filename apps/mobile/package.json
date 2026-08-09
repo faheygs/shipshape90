@@ -10,7 +10,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc -p tsconfig.json",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "vitest run"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.0",
@@ -64,6 +65,7 @@
     "@types/react": "^19.0.0",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.1",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.10"
   }
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { communityKeys } from "../community/useCommunityActivity";
+import { challengeActivityKeys } from "../activity/useChallengeActivity";
 import { leaderboardKeys } from "../leaderboard/useChallengeLeaderboard";
 import { todayTaskKeys } from "../tasks/useTodayTasks";
 import { amendChallengeDay, listChallengeDay, listChallengeHistory, listMyChallengeHistory } from "./challengeHistoryRepository";
@@ -42,8 +42,7 @@ export function useAmendChallengeDay(challengeId: string) {
         queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(challengeId) }),
         queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(challengeId) }),
         queryClient.invalidateQueries({ queryKey: leaderboardKeys.streak(challengeId) }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.all }),
-        queryClient.invalidateQueries({ queryKey: communityKeys.challenge(challengeId) }),
+        queryClient.invalidateQueries({ queryKey: challengeActivityKeys.detail(challengeId) }),
       ]);
     },
   });

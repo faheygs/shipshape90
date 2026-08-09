@@ -1,22 +1,19 @@
 import { BackButton, Button, Icon, TaskCheck, theme, useAppDialog, type TaskCheckState } from "@shipshape/ui-mobile";
 import { getShipShapePointRules } from "@shipshape/domain";
-import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BodyProgressPanel } from "../../src/components/BodyProgressPanel";
 import { ChallengeHistoryPanel } from "../../src/components/ChallengeHistoryPanel";
 import { GameLeaderboard } from "../../src/components/GameLeaderboard";
 import { RequiredCheckinGate } from "../../src/components/RequiredCheckinGate";
-import { challengeCheckinKeys, useChallengeCheckins } from "../../src/features/checkins/useChallengeCheckins";
-import { challengeKeys, useChallenges, useLeaveChallenge } from "../../src/features/challenges/useChallenges";
-import { communityKeys, useChallengeActivity } from "../../src/features/community/useCommunityActivity";
-import { challengeHistoryKeys } from "../../src/features/history/useChallengeHistory";
-import { leaderboardKeys, useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
-import { subscribeToChallenge } from "../../src/features/realtime/realtimeClient";
-import { todayTaskKeys, useSubmitChallengeDay, useTodayTasks } from "../../src/features/tasks/useTodayTasks";
+import { useChallengeCheckins } from "../../src/features/checkins/useChallengeCheckins";
+import { useChallenges, useLeaveChallenge } from "../../src/features/challenges/useChallenges";
+import { useChallengeActivity } from "../../src/features/activity/useChallengeActivity";
+import { useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
+import { useSubmitChallengeDay, useTodayTasks } from "../../src/features/tasks/useTodayTasks";
 
 type ChallengeSection = "today" | "leaderboard" | "progress" | "activity" | "history";
 const sections: { id: ChallengeSection; label: string }[] = [
@@ -37,7 +34,6 @@ const activityTitle = (entry: { actorName: string; eventType: string; metadata: 
 
 export default function ActiveChallengeScreen() {
   const { id = "shipshape-90" } = useLocalSearchParams<{ id: string }>();
-  const queryClient = useQueryClient();
   const { showDialog } = useAppDialog();
   const leave = useLeaveChallenge();
   const challenges = useChallenges();
@@ -68,21 +64,6 @@ export default function ActiveChallengeScreen() {
   const blockingCheckpoint = checkins.data?.find((checkpoint) => checkpoint.isBlocking);
   const bonusRules = [weightBonusCalculation ? `Weight ${weightBonusCalculation === "percentage" ? "percentage" : "total"} change` : "", bodyFatBonusCalculation ? `body-fat ${bodyFatBonusCalculation === "percentage" ? "percentage" : "total"} change` : ""].filter(Boolean).join(" and ");
   const scoringRule = `+1 point per completed task. −3 points per missed task. With ${tasks.length || "the scheduled"} daily tasks, a perfect day adds +${pointRules.perfectDayBonus} and every 7-day perfect streak adds +${pointRules.sevenDayStreakBonus}.${bonusRules ? ` ${bonusRules} add independent bonus points.` : ""}`;
-
-  useEffect(() => {
-    let unsubscribe: () => void = () => undefined;
-    subscribeToChallenge(id, () => {
-      void queryClient.invalidateQueries({ queryKey: challengeKeys.all });
-      void queryClient.invalidateQueries({ queryKey: communityKeys.all });
-      void queryClient.invalidateQueries({ queryKey: communityKeys.challenge(id) });
-      void queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.list(id) });
-      void queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: leaderboardKeys.streak(id) });
-      void queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: challengeCheckinKeys.detail(id) });
-    }).then((cleanup) => { unsubscribe = cleanup; }).catch(() => undefined);
-    return () => unsubscribe();
-  }, [id, queryClient]);
 
   const toggleTask = (occurrenceId: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

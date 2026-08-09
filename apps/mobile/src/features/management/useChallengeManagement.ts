@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { challengeKeys } from "../challenges/useChallenges";
 import { challengeHistoryKeys } from "../history/useChallengeHistory";
-import { subscribeToChallenge } from "../realtime/realtimeClient";
 import {
   closeManagedChallenge,
   createManagedInvite,
@@ -27,26 +25,6 @@ export const useChallengeManagement = (challengeId: string) => useQuery({ queryK
 export const useManagedChallengeMembers = (challengeId: string) => useQuery({ queryKey: managementKeys.members(challengeId), queryFn: () => listManagedChallengeMembers(challengeId), enabled: Boolean(challengeId) });
 export const useManagedChallengeQueue = (challengeId: string) => useQuery({ queryKey: managementKeys.queue(challengeId), queryFn: () => listManagedChallengeQueue(challengeId), enabled: Boolean(challengeId) });
 export const useManagedChallengeInvites = (challengeId: string) => useQuery({ queryKey: managementKeys.invites(challengeId), queryFn: () => listManagedChallengeInvites(challengeId), enabled: Boolean(challengeId) });
-
-export function useManagedChallengeRealtime(challengeId: string) {
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    if (!challengeId) return;
-    let disposed = false;
-    let unsubscribe: () => void = () => undefined;
-    void subscribeToChallenge(challengeId, () => {
-      void queryClient.invalidateQueries({ queryKey: managementKeys.all(challengeId) });
-      void queryClient.invalidateQueries({ queryKey: challengeKeys.all });
-    }).then((cleanup) => {
-      if (disposed) cleanup();
-      else unsubscribe = cleanup;
-    }).catch(() => undefined);
-    return () => {
-      disposed = true;
-      unsubscribe();
-    };
-  }, [challengeId, queryClient]);
-}
 
 const useRefreshManagement = (challengeId: string) => {
   const queryClient = useQueryClient();

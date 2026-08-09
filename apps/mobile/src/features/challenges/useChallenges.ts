@@ -16,8 +16,8 @@ import {
 
 export const challengeKeys = { all: ["challenges"] as const };
 
-export function useChallenges() {
-  return useQuery({ queryKey: challengeKeys.all, queryFn: listChallenges });
+export function useChallenges(enabled = true) {
+  return useQuery({ queryKey: challengeKeys.all, queryFn: listChallenges, enabled });
 }
 
 export function useChallengeTasks(challengeId: string) {

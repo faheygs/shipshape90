@@ -11,7 +11,6 @@ import {
   useManagedChallengeInvites,
   useManagedChallengeMembers,
   useManagedChallengeQueue,
-  useManagedChallengeRealtime,
   useRemoveManagedMember,
   useReviewJoinRequest,
 } from "../../src/features/management/useChallengeManagement";
@@ -38,7 +37,6 @@ export default function ManageChallengeScreen() {
   const { showDialog } = useAppDialog();
   const [section, setSection] = useState<ManageSection>(requestedSection === "requests" ? "requests" : "overview");
   const summary = useChallengeManagement(id);
-  useManagedChallengeRealtime(id);
   const members = useManagedChallengeMembers(id);
   const queue = useManagedChallengeQueue(id);
   const invites = useManagedChallengeInvites(id);
