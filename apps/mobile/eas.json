@@ -23,7 +23,10 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6799583154"
+        "ascAppId": "6799583154",
+        "groups": [
+          "App Store Connect Users"
+        ]
       }
     }
   }
