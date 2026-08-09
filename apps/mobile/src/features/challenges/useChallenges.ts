@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { closeRealtimeConnection } from "../realtime/realtimeClient";
+import { closeRealtimeConnection, refreshRealtimeAuthorization } from "../realtime/realtimeClient";
 import { challengeHistoryKeys } from "../history/useChallengeHistory";
 import {
   joinChallenge,
@@ -8,6 +8,8 @@ import {
   listChallengeTasks,
   setChallengeSaved,
   setChallengeQueued,
+  replaceChallengeQueue,
+  requestPrivateChallengeJoin,
   switchChallenge,
   type ChallengeListItem,
 } from "./challengeRepository";
@@ -30,8 +32,8 @@ export function useJoinChallenge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ challengeId, inviteCode }: { challengeId: string; inviteCode?: string }) => joinChallenge(challengeId, inviteCode),
-    onSuccess: () => {
-      closeRealtimeConnection();
+    onSuccess: async () => {
+      try { await refreshRealtimeAuthorization(); } catch { closeRealtimeConnection(); }
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: challengeKeys.all }),
         queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.summary }),
@@ -44,13 +46,22 @@ export function useSwitchChallenge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ challengeId, inviteCode }: { challengeId: string; inviteCode?: string }) => switchChallenge(challengeId, inviteCode),
-    onSuccess: () => {
-      closeRealtimeConnection();
+    onSuccess: async () => {
+      try { await refreshRealtimeAuthorization(); } catch { closeRealtimeConnection(); }
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: challengeKeys.all }),
         queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.summary }),
       ]);
     },
+  });
+}
+
+export function useRequestPrivateChallengeJoin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ challengeId, inviteCode }: { challengeId: string; inviteCode?: string }) =>
+      requestPrivateChallengeJoin(challengeId, inviteCode),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: challengeKeys.all }),
   });
 }
 
@@ -76,8 +87,10 @@ export function useSetChallengeSaved() {
 export function useSetChallengeQueued() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ challengeId, isQueued, allowAutoSwitch = false }: { challengeId: string; isQueued: boolean; allowAutoSwitch?: boolean }) =>
-      setChallengeQueued(challengeId, isQueued, allowAutoSwitch),
+    mutationFn: ({ challengeId, isQueued, allowAutoSwitch = false, replaceExisting = false }: { challengeId: string; isQueued: boolean; allowAutoSwitch?: boolean; replaceExisting?: boolean }) =>
+      replaceExisting && isQueued
+        ? replaceChallengeQueue(challengeId, allowAutoSwitch)
+        : setChallengeQueued(challengeId, isQueued, allowAutoSwitch),
     onMutate: async ({ challengeId, isQueued }) => {
       await queryClient.cancelQueries({ queryKey: challengeKeys.all });
       const previous = queryClient.getQueryData<ChallengeListItem[]>(challengeKeys.all);
@@ -99,8 +112,8 @@ export function useLeaveChallenge() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: leaveChallenge,
-    onSuccess: () => {
-      closeRealtimeConnection();
+    onSuccess: async () => {
+      try { await refreshRealtimeAuthorization(); } catch { closeRealtimeConnection(); }
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: challengeKeys.all }),
         queryClient.invalidateQueries({ queryKey: challengeHistoryKeys.summary }),

@@ -5,25 +5,32 @@ import { BackButton, Button, ChoiceChip, Icon, theme, useAppDialog } from "@ship
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { createChallengeDraft, publishChallenge } from "../src/features/challenges/challengeRepository";
-import { challengeKeys } from "../src/features/challenges/useChallenges";
+import { createChallenge } from "../src/features/challenges/challengeRepository";
+import { challengeKeys, useChallenges } from "../src/features/challenges/useChallenges";
 import { useTaskCatalog } from "../src/features/catalog/useTaskCatalog";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
+import { closeRealtimeConnection, refreshRealtimeAuthorization } from "../src/features/realtime/realtimeClient";
 
-const stepLabels = ["Basics", "Stakes", "Tasks", "Rules"] as const;
+const stepLabels = ["Basics", "Stakes", "Check-ins", "Tasks", "Rules"] as const;
 const visibilityOptions = ["public", "private"] as const;
 type Visibility = (typeof visibilityOptions)[number];
 type RewardType = "bragging" | "prize";
-type BonusMetric = "none" | "weight" | "body_fat";
 type BonusCalculation = "percentage" | "total_change";
 type OpenDate = "start" | "end" | null;
+type CheckpointPreset = "simple" | "halfway" | "milestones" | "custom";
 
-const bonusOptions: { id: BonusMetric; title: string; description: string; badge: string }[] = [
-  { id: "none", title: "No extra metric", description: "Leaderboard points come from completed tasks, missed-task penalties, perfect days, and streak bonuses.", badge: "SIMPLE" },
-  { id: "weight", title: "Add weight change", description: "Weight progress adds bonus points on top of every ShipShape point earned.", badge: "EXTRA" },
-  { id: "body_fat", title: "Add body-fat change", description: "Body-fat progress adds bonus points on top of every ShipShape point earned.", badge: "EXTRA" },
-];
+interface CheckpointDraft {
+  id: string;
+  kind: "start" | "milestone" | "final";
+  label: string;
+  dayNumber: string;
+  requiresWeight: boolean;
+  requiresBodyFat: boolean;
+  requiresPhoto: boolean;
+}
 
 interface TaskConfiguration {
   instructions: string;
@@ -38,12 +45,25 @@ const dateValue = (date: Date) => {
 
 const dateFromValue = (value: string) => new Date(`${value}T12:00:00`);
 const isMeasurable = (task: TaskCatalogItem) => ["count", "quantity", "duration"].includes(task.taskType);
+const challengeDays = (start: string, end: string) => Math.max(2, Math.round((dateFromValue(end).getTime() - dateFromValue(start).getTime()) / 86_400_000) + 1);
+
+const checkpointDraft = (id: string, kind: CheckpointDraft["kind"], label: string, dayNumber: number): CheckpointDraft => ({
+  id,
+  kind,
+  label,
+  dayNumber: String(dayNumber),
+  requiresWeight: true,
+  requiresBodyFat: kind !== "milestone",
+  requiresPhoto: kind !== "milestone",
+});
 
 function DateField({ label, value, minimumDate, open, onToggle, onClose, onChange }: { label: string; value: string; minimumDate: Date; open: boolean; onToggle: () => void; onClose: () => void; onChange: (value: string) => void }) {
   const selectedDate = dateFromValue(value);
   const handleChange = (_event: DateTimePickerEvent, next?: Date) => {
-    if (Platform.OS === "android") onClose();
-    if (next) onChange(dateValue(next));
+    if (next) {
+      onChange(dateValue(next));
+      onClose();
+    } else if (Platform.OS === "android") onClose();
   };
 
   return (
@@ -57,19 +77,34 @@ function DateField({ label, value, minimumDate, open, onToggle, onClose, onChang
       </Pressable>
       {open ? (
         <View style={styles.pickerCard}>
-          <DateTimePicker value={selectedDate} mode="date" display={Platform.OS === "ios" ? "inline" : "default"} minimumDate={minimumDate} onChange={handleChange} themeVariant="light" />
-          {Platform.OS === "ios" ? <Button size="sm" variant="secondary" onPress={onClose}>Use this date</Button> : null}
+          <DateTimePicker value={selectedDate} mode="date" display={Platform.OS === "ios" ? "inline" : "default"} minimumDate={minimumDate} onChange={handleChange} themeVariant="light" accentColor={theme.colors.brand} />
         </View>
       ) : null}
     </View>
   );
 }
 
+function ToggleRow({ title, description, value, locked = false, onValueChange }: { title: string; description: string; value: boolean; locked?: boolean; onValueChange: (value: boolean) => void }) {
+  return <View style={[styles.toggleRow, value && styles.toggleRowActive]}>
+    <View style={styles.toggleCopy}><Text style={styles.toggleTitle}>{title}</Text><Text style={styles.toggleDescription}>{description}</Text></View>
+    <Switch
+      accessibilityLabel={title}
+      value={value}
+      disabled={locked}
+      onValueChange={onValueChange}
+      trackColor={{ false: theme.colors.borderStrong, true: theme.colors.brand }}
+      thumbColor={theme.colors.surface}
+      ios_backgroundColor={theme.colors.borderStrong}
+    />
+  </View>;
+}
+
 export default function CreateChallengeScreen() {
   const queryClient = useQueryClient();
   const { showDialog } = useAppDialog();
   const catalog = useTaskCatalog();
-  const scrollRef = useRef<ScrollView>(null);
+  const challenges = useChallenges();
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
   const defaults = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -86,8 +121,15 @@ export default function CreateChallengeScreen() {
   const [startsOn, setStartsOn] = useState(defaults.startsOn);
   const [endsOn, setEndsOn] = useState(defaults.endsOn);
   const [rewardType, setRewardType] = useState<RewardType>("bragging");
-  const [bonusMetric, setBonusMetric] = useState<BonusMetric>("none");
-  const [bonusCalculation, setBonusCalculation] = useState<BonusCalculation>("percentage");
+  const [weightBonusCalculation, setWeightBonusCalculation] = useState<BonusCalculation | null>(null);
+  const [bodyFatBonusCalculation, setBodyFatBonusCalculation] = useState<BonusCalculation | null>(null);
+  const [checkpointPreset, setCheckpointPreset] = useState<CheckpointPreset>("milestones");
+  const [checkpoints, setCheckpoints] = useState<CheckpointDraft[]>(() => [
+    checkpointDraft("start", "start", "Start", 1),
+    checkpointDraft("milestone-1", "milestone", "First milestone", 30),
+    checkpointDraft("milestone-2", "milestone", "Second milestone", 60),
+    checkpointDraft("final", "final", "Final", 90),
+  ]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [taskConfig, setTaskConfig] = useState<Record<string, TaskConfiguration>>({});
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -96,6 +138,40 @@ export default function CreateChallengeScreen() {
 
   const reward = rewardType === "bragging" ? "Bragging rights" : "Prize";
   const pointRules = getShipShapePointRules(selectedIds.length);
+  const durationDays = challengeDays(startsOn, endsOn);
+  const endMinimumDate = dateFromValue(startsOn);
+  endMinimumDate.setDate(endMinimumDate.getDate() + 1);
+
+  const applyCheckpointPreset = (preset: CheckpointPreset) => {
+    const start = checkpointDraft("start", "start", "Start", 1);
+    const final = checkpointDraft("final", "final", "Final", durationDays);
+    const halfway = Math.max(2, Math.min(durationDays - 1, Math.round((durationDays + 1) / 2)));
+    const firstThird = Math.max(2, Math.round(durationDays / 3));
+    const secondThird = Math.min(durationDays - 1, Math.round(durationDays * 2 / 3));
+    setCheckpointPreset(preset);
+    if (preset === "simple") setCheckpoints([start, final]);
+    else if (preset === "halfway") setCheckpoints([start, checkpointDraft("milestone-1", "milestone", "Halfway", halfway), final]);
+    else if (preset === "milestones") setCheckpoints([start, checkpointDraft("milestone-1", "milestone", "First milestone", firstThird), checkpointDraft("milestone-2", "milestone", "Second milestone", secondThird), final]);
+    else setCheckpoints([start, final]);
+  };
+
+  const updateCheckpoint = (id: string, update: Partial<CheckpointDraft>) => {
+    setCheckpoints((current) => current.map((checkpoint) => checkpoint.id === id ? { ...checkpoint, ...update } : checkpoint));
+    setError(null);
+  };
+
+  const addCheckpoint = () => {
+    const milestones = checkpoints.filter((checkpoint) => checkpoint.kind === "milestone");
+    if (milestones.length >= 3 || durationDays <= 2) return;
+    const candidate = Math.max(2, Math.min(durationDays - 1, Math.round(durationDays * (milestones.length + 1) / (milestones.length + 2))));
+    setCheckpointPreset("custom");
+    setCheckpoints((current) => [...current.filter((item) => item.kind !== "final"), checkpointDraft(`milestone-${Date.now()}`, "milestone", `Milestone ${milestones.length + 1}`, candidate), current.find((item) => item.kind === "final")!]);
+  };
+
+  const removeCheckpoint = (id: string) => {
+    setCheckpointPreset("custom");
+    setCheckpoints((current) => current.filter((checkpoint) => checkpoint.id !== id));
+  };
 
   const toggleTask = (task: TaskCatalogItem) => {
     setError(null);
@@ -131,9 +207,23 @@ export default function CreateChallengeScreen() {
     return Number(config.targetValue) > 0 && Boolean(config.unit);
   });
 
+  const checkpointsValid = checkpoints.length >= 2 && checkpoints.length <= 5
+    && checkpoints.filter((checkpoint) => checkpoint.kind === "start").length === 1
+    && checkpoints.filter((checkpoint) => checkpoint.kind === "final").length === 1
+    && new Set(checkpoints.map((checkpoint) => Number(checkpoint.dayNumber))).size === checkpoints.length
+    && checkpoints.every((checkpoint) => {
+      const day = Number(checkpoint.dayNumber);
+      const forcedWeight = (checkpoint.kind === "start" || checkpoint.kind === "final") && weightBonusCalculation !== null;
+      const forcedBodyFat = (checkpoint.kind === "start" || checkpoint.kind === "final") && bodyFatBonusCalculation !== null;
+      return Number.isInteger(day) && day >= 1 && day <= durationDays
+        && (checkpoint.kind !== "milestone" || (day > 1 && day < durationDays))
+        && (checkpoint.requiresPhoto || checkpoint.requiresWeight || checkpoint.requiresBodyFat || forcedWeight || forcedBodyFat);
+    });
+
   const stepValid = [
     name.trim().length >= 2,
-    endsOn >= startsOn && endsOn >= defaults.startsOn,
+    endsOn > startsOn && endsOn >= defaults.startsOn,
+    checkpointsValid,
     selectedIds.length > 0,
     selectedTasksValid,
   ][step];
@@ -144,13 +234,24 @@ export default function CreateChallengeScreen() {
 
   const changeStartDate = (next: string) => {
     setStartsOn(next);
-    if (endsOn < next) setEndsOn(next);
+    const minimumEnd = dateFromValue(next);
+    minimumEnd.setDate(minimumEnd.getDate() + 1);
+    const nextEnd = endsOn <= next ? dateValue(minimumEnd) : endsOn;
+    if (endsOn <= next) setEndsOn(nextEnd);
+    const nextDuration = challengeDays(next, nextEnd);
+    setCheckpoints((current) => current.map((checkpoint) => checkpoint.kind === "final" ? { ...checkpoint, dayNumber: String(nextDuration) } : checkpoint));
+  };
+
+  const changeEndDate = (next: string) => {
+    setEndsOn(next);
+    const nextDuration = challengeDays(startsOn, next);
+    setCheckpoints((current) => current.map((checkpoint) => checkpoint.kind === "final" ? { ...checkpoint, dayNumber: String(nextDuration) } : checkpoint));
   };
 
   const moveToStep = (next: number) => {
     setOpenDate(null);
     setError(null);
-    if (next === 3 && !editingTaskId) setEditingTaskId(selectedIds[0] ?? null);
+    if (next === 4 && !editingTaskId) setEditingTaskId(selectedIds[0] ?? null);
     setStep(next);
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
   };
@@ -160,12 +261,16 @@ export default function CreateChallengeScreen() {
     else moveToStep(step - 1);
   };
 
-  const save = async () => {
+  const openHostControls = (challengeId: string) => {
+    router.replace({ pathname: "/manage-challenge/[id]", params: { id: challengeId } });
+  };
+
+  const save = async (allowAutoSwitch = false, replaceExistingQueue = false) => {
     if (!stepValid) return;
     setSaving(true);
     setError(null);
     try {
-      const challengeId = await createChallengeDraft({
+      const challengeInput = {
         name,
         description,
         visibility,
@@ -173,18 +278,48 @@ export default function CreateChallengeScreen() {
         startsOn,
         endsOn,
         reward,
-        bonusMetric,
-        bonusCalculation: bonusMetric === "none" ? null : bonusCalculation,
+        weightBonusCalculation,
+        bodyFatBonusCalculation,
+        checkpoints: checkpoints
+          .map((checkpoint) => ({
+            kind: checkpoint.kind,
+            label: checkpoint.label.trim(),
+            dayNumber: Number(checkpoint.dayNumber),
+            requiresWeight: checkpoint.kind === "start" || checkpoint.kind === "final" ? true : checkpoint.requiresWeight,
+            requiresBodyFat: checkpoint.kind === "start" || checkpoint.kind === "final" ? true : checkpoint.requiresBodyFat,
+            requiresPhoto: checkpoint.kind === "start" || checkpoint.kind === "final" ? true : checkpoint.requiresPhoto,
+          }))
+          .sort((left, right) => left.dayNumber - right.dayNumber),
         tasks: selectedIds.map((catalogTaskId) => ({
           catalogTaskId,
           instructions: taskConfig[catalogTaskId]?.instructions.trim() ?? "",
           targetValue: taskConfig[catalogTaskId]?.targetValue ? Number(taskConfig[catalogTaskId].targetValue) : null,
           unit: taskConfig[catalogTaskId]?.unit || null,
         })),
-      });
-      const status = await publishChallenge(challengeId);
+        allowAutoSwitch,
+        replaceExistingQueue,
+      } as const;
+      const { challengeId, status } = await createChallenge(challengeInput);
+      try { await refreshRealtimeAuthorization(); } catch { closeRealtimeConnection(); }
       await queryClient.invalidateQueries({ queryKey: challengeKeys.all });
-      showDialog({ icon: "trophy", eyebrow: status === "active" ? "CHALLENGE LIVE" : "CHALLENGE PUBLISHED", title: status === "active" ? "Let’s get to work." : "Registration is open.", message: status === "active" ? "Today’s tasks are ready." : "The tasks begin on the start date.", actions: [{ label: "Continue", onPress: () => router.replace(status === "active" ? `/challenge/${challengeId}` : "/(tabs)/challenges") }] });
+
+      if (status === "active") {
+        showDialog({
+          icon: "trophy",
+          eyebrow: "CHALLENGE LIVE",
+          title: "Let's get to work.",
+          message: "You're in. Complete your Start check-in to unlock today's tasks.",
+          actions: [{ label: "Open challenge", onPress: () => router.replace(`/challenge/${challengeId}`) }],
+        });
+      } else {
+        showDialog({
+          icon: "trophy",
+          eyebrow: "CHALLENGE PUBLISHED",
+          title: "You're hosting—and you're in.",
+          message: `This is now your one queued challenge. You'll join automatically when it starts${allowAutoSwitch ? ", switching from your current challenge if necessary" : ""}.`,
+          actions: [{ label: "Open host controls", onPress: () => openHostControls(challengeId) }],
+        });
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "We couldn't publish that challenge.");
     } finally {
@@ -192,9 +327,49 @@ export default function CreateChallengeScreen() {
     }
   };
 
+  const prepareCreate = () => {
+    const currentChallenge = challenges.data?.find((challenge) =>
+      ["pending", "active"].includes(challenge.membershipStatus),
+    );
+    const startsNow = startsOn <= dateValue(defaults.today);
+    const queuedChallenge = startsNow ? undefined : challenges.data?.find((challenge) => challenge.isQueued);
+    const overlapsCurrent = Boolean(currentChallenge && currentChallenge.endsOn >= startsOn);
+    const needsConfirmation = overlapsCurrent || Boolean(queuedChallenge);
+
+    if (!needsConfirmation) {
+      void save(false, false);
+      return;
+    }
+
+    const effects = [
+      queuedChallenge ? `${queuedChallenge.name} will be removed from Up next.` : null,
+      overlapsCurrent && currentChallenge
+        ? startsNow
+          ? `${currentChallenge.name} will be left immediately and prize eligibility will be forfeited.`
+          : `${currentChallenge.name} will be left when this challenge starts if it is still active.`
+        : null,
+    ].filter(Boolean).join(" ");
+
+    showDialog({
+      icon: "alert",
+      eyebrow: "HOSTS PARTICIPATE",
+      title: startsNow && overlapsCurrent ? "This switches challenges now." : "Make this your next challenge?",
+      message: `Creating a challenge automatically enters you as a participant. ${effects}`,
+      dismissible: true,
+      actions: [
+        { label: "Go back", variant: "secondary" },
+        {
+          label: startsNow && overlapsCurrent ? "Create & switch now" : "Create & schedule",
+          variant: overlapsCurrent ? "danger" : "primary",
+          onPress: () => void save(overlapsCurrent, Boolean(queuedChallenge)),
+        },
+      ],
+    });
+  };
+
   const primaryAction = () => {
-    if (step < 3) moveToStep(step + 1);
-    else void save();
+    if (step < 4) moveToStep(step + 1);
+    else prepareCreate();
   };
 
   return (
@@ -202,13 +377,13 @@ export default function CreateChallengeScreen() {
       <View style={styles.screen}>
         <View style={styles.header}>
           <BackButton onPress={goBack} />
-          <View style={styles.headerCopy}><Text style={styles.headerStep}>STEP {step + 1} OF 4</Text><Text style={styles.headerLabel}>{stepLabels[step]}</Text></View>
+          <View style={styles.headerCopy}><Text style={styles.headerStep}>STEP {step + 1} OF 5</Text><Text style={styles.headerLabel}>{stepLabels[step]}</Text></View>
           <View style={styles.headerSpacer} />
         </View>
         <View style={styles.progress}>{stepLabels.map((label, index) => <View key={label} style={[styles.progressTrack, index <= step && styles.progressTrackActive]} />)}</View>
 
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={8}>
-          <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <View style={styles.flex}>
+          <KeyboardAwareScrollView ref={scrollRef} bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             {step === 0 ? (
               <>
                 <View style={styles.stepHero}>
@@ -217,7 +392,7 @@ export default function CreateChallengeScreen() {
                   <Text style={styles.stepSubtitle}>Give people one clear reason to show up every day.</Text>
                 </View>
                 <View style={styles.formCard}>
-                  <View style={styles.field}><Text style={styles.label}>CHALLENGE NAME</Text><TextInput value={name} onChangeText={setName} placeholder="90 Strong" placeholderTextColor={theme.colors.textMuted} maxLength={80} style={styles.input} /></View>
+                  <View style={styles.field}><Text style={styles.label}>CHALLENGE NAME</Text><TextInput value={name} onChangeText={setName} placeholder="90 Strong" placeholderTextColor={theme.colors.textMuted} maxLength={80} returnKeyType="next" style={styles.input} /></View>
                   <View style={styles.field}><Text style={styles.label}>SHORT DESCRIPTION</Text><TextInput value={description} onChangeText={setDescription} placeholder="What are people committing to?" placeholderTextColor={theme.colors.textMuted} multiline maxLength={1000} style={[styles.input, styles.textarea]} /></View>
                 </View>
                 <View style={styles.centerSection}>
@@ -237,27 +412,21 @@ export default function CreateChallengeScreen() {
                 </View>
                 <View style={styles.stack}>
                   <DateField label="STARTS" value={startsOn} minimumDate={defaults.today} open={openDate === "start"} onToggle={() => setOpenDate(openDate === "start" ? null : "start")} onClose={() => setOpenDate(null)} onChange={changeStartDate} />
-                  <DateField label="ENDS" value={endsOn} minimumDate={dateFromValue(startsOn)} open={openDate === "end"} onToggle={() => setOpenDate(openDate === "end" ? null : "end")} onClose={() => setOpenDate(null)} onChange={setEndsOn} />
+                  <DateField label="ENDS" value={endsOn} minimumDate={endMinimumDate} open={openDate === "end"} onToggle={() => setOpenDate(openDate === "end" ? null : "end")} onClose={() => setOpenDate(null)} onChange={changeEndDate} />
                 </View>
                 <View style={styles.scoringSection}>
                   <View style={styles.alwaysOnCard}><View style={styles.alwaysOnIcon}><Icon name="flame" size={25} color={theme.colors.brandStrong}/></View><View style={styles.alwaysOnCopy}><Text style={styles.alwaysOnLabel}>ALWAYS ON</Text><Text style={styles.alwaysOnTitle}>ShipShape Points</Text><Text style={styles.alwaysOnBody}>+1 per completed task and −3 per missed task. Perfect-day and 7-day streak bonuses scale automatically with the number of daily tasks.</Text></View></View>
-                  <Text style={styles.sectionTitle}>Add extra scoring?</Text>
-                  <Text style={styles.helpCentered}>Body progress is optional and always adds to ShipShape Points.</Text>
+                  <View style={styles.endPointsIntro}><Text style={styles.endPointsEyebrow}>OPTIONAL · SCORED AT THE FINISH</Text><Text style={styles.sectionTitle}>Additional points</Text><Text style={styles.helpCentered}>Give people another way to compete even if they miss a few days. Final results are compared with each person’s own Start check-in.</Text></View>
                   <View style={styles.scoringOptions}>
-                    {bonusOptions.map((option) => {
-                      const selected = bonusMetric === option.id;
-                      return (
-                        <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ selected }} onPress={() => setBonusMetric(option.id)} style={({ pressed }) => [styles.scoringCard, selected && styles.scoringCardSelected, pressed && styles.pressed]}>
-                          <View style={[styles.radio, selected && styles.radioSelected]}>{selected ? <View style={styles.radioDot} /> : null}</View>
-                          <View style={styles.scoringCopy}>
-                            <View style={styles.scoringTitleRow}><Text style={styles.scoringTitle}>{option.title}</Text><Text style={[styles.scoringBadge, selected && styles.scoringBadgeSelected]}>{option.badge}</Text></View>
-                            <Text style={styles.scoringBody}>{option.description}</Text>
-                          </View>
-                        </Pressable>
-                      );
-                    })}
+                    <View style={styles.endPointsCard}>
+                      <ToggleRow title="Weight change" description="Add points for weight lost between Start and Final." value={weightBonusCalculation !== null} onValueChange={(enabled) => setWeightBonusCalculation(enabled ? "percentage" : null)} />
+                      {weightBonusCalculation ? <View style={styles.methodArea}><Text style={styles.label}>HOW TO MAKE IT FAIR</Text><View style={styles.methodPicker}><Pressable onPress={() => setWeightBonusCalculation("percentage")} style={[styles.methodOption, weightBonusCalculation === "percentage" && styles.methodOptionActive]}><Text style={[styles.methodOptionText, weightBonusCalculation === "percentage" && styles.methodOptionTextActive]}>Percentage</Text></Pressable><Pressable onPress={() => setWeightBonusCalculation("total_change")} style={[styles.methodOption, weightBonusCalculation === "total_change" && styles.methodOptionActive]}><Text style={[styles.methodOptionText, weightBonusCalculation === "total_change" && styles.methodOptionTextActive]}>Total change</Text></Pressable></View><Text style={styles.methodHelp}>{weightBonusCalculation === "percentage" ? "Best when competitors start at different weights. A 4.2% decrease earns 4.2 points." : "Best when everyone wants raw change. A 10-unit decrease earns 10 points."}</Text></View> : null}
+                    </View>
+                    <View style={styles.endPointsCard}>
+                      <ToggleRow title="Body-fat change" description="Add a separate set of points for body-fat reduction." value={bodyFatBonusCalculation !== null} onValueChange={(enabled) => setBodyFatBonusCalculation(enabled ? "total_change" : null)} />
+                      {bodyFatBonusCalculation ? <View style={styles.methodArea}><Text style={styles.label}>HOW TO MAKE IT FAIR</Text><View style={styles.methodPicker}><Pressable onPress={() => setBodyFatBonusCalculation("percentage")} style={[styles.methodOption, bodyFatBonusCalculation === "percentage" && styles.methodOptionActive]}><Text style={[styles.methodOptionText, bodyFatBonusCalculation === "percentage" && styles.methodOptionTextActive]}>Percentage</Text></Pressable><Pressable onPress={() => setBodyFatBonusCalculation("total_change")} style={[styles.methodOption, bodyFatBonusCalculation === "total_change" && styles.methodOptionActive]}><Text style={[styles.methodOptionText, bodyFatBonusCalculation === "total_change" && styles.methodOptionTextActive]}>Percentage points</Text></Pressable></View><Text style={styles.methodHelp}>{bodyFatBonusCalculation === "percentage" ? "A relative 10% reduction earns 10 points." : "A drop from 25% to 22% earns 3 points."}</Text></View> : null}
+                    </View>
                   </View>
-                  {bonusMetric !== "none" ? <View style={styles.calculationCard}><Text style={styles.label}>HOW SHOULD CHANGE ADD POINTS?</Text><View style={styles.centerChoices}><ChoiceChip label="Percentage change" selected={bonusCalculation === "percentage"} onPress={() => setBonusCalculation("percentage")} /><ChoiceChip label="Total change" selected={bonusCalculation === "total_change"} onPress={() => setBonusCalculation("total_change")} /></View><Text style={styles.helpCentered}>{bonusCalculation === "percentage" ? "A 4.2% decrease adds 4.2 bonus points." : bonusMetric === "weight" ? "A 10 lb decrease adds 10 bonus points." : "A 3-point body-fat decrease adds 3 bonus points."}</Text></View> : null}
                 </View>
                 <View style={styles.centerSection}>
                   <Text style={styles.sectionTitle}>Winner receives</Text>
@@ -271,6 +440,67 @@ export default function CreateChallengeScreen() {
             ) : null}
 
             {step === 2 ? (
+              <>
+                <View style={styles.stepHero}>
+                  <Text style={styles.eyebrow}>PROGRESS CHECK-INS</Text>
+                  <Text style={styles.stepTitle}>Set the markers.</Text>
+                  <Text style={styles.stepSubtitle}>Choose when everyone pauses to record progress. Start and Final are always included; add up to three moments in between.</Text>
+                </View>
+                <View style={styles.presetCard}>
+                  <View style={styles.scheduleHeader}><Text style={styles.scheduleEyebrow}>QUICK SCHEDULE</Text><Text style={styles.scheduleTitle}>Choose a check-in rhythm</Text><Text style={styles.scheduleIntro}>Start and Final are already included. Pick how often everyone checks in between them.</Text></View>
+                  <View style={styles.scheduleGrid}>
+                    {([
+                      { id: "simple" as const, title: "Essentials", count: 2, minimumDays: 2, detail: `Day 1 · Day ${durationDays}` },
+                      { id: "halfway" as const, title: "Halfway", count: 3, minimumDays: 3, detail: `Day 1 · ${Math.max(2, Math.min(durationDays - 1, Math.round((durationDays + 1) / 2)))} · ${durationDays}` },
+                      { id: "milestones" as const, title: "Milestones", count: 4, minimumDays: 4, detail: `Day 1 · ${Math.max(2, Math.round(durationDays / 3))} · ${Math.min(durationDays - 1, Math.round(durationDays * 2 / 3))} · ${durationDays}` },
+                      { id: "custom" as const, title: "Custom", count: 2, minimumDays: 2, detail: "Choose up to 3 days" },
+                    ]).map((option) => {
+                      const selected = checkpointPreset === option.id;
+                      const disabled = durationDays < option.minimumDays;
+                      return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ selected, disabled }} disabled={disabled} onPress={() => applyCheckpointPreset(option.id)} style={({ pressed }) => [styles.scheduleTile, selected && styles.scheduleTileSelected, disabled && styles.scheduleTileDisabled, pressed && styles.pressed]}>
+                        <View style={[styles.scheduleCountBox, selected && styles.scheduleCountBoxSelected]}><Text style={[styles.scheduleCount, selected && styles.scheduleCountSelected]}>{option.id === "custom" ? "2–5" : option.count}</Text><Text style={[styles.scheduleCountLabel, selected && styles.scheduleCountLabelSelected]}>CHECK-INS</Text></View>
+                        <View style={styles.scheduleTileCopy}><Text style={[styles.scheduleTileTitle, selected && styles.scheduleTileTitleSelected]}>{option.title}</Text><Text numberOfLines={1} style={styles.scheduleTileDetail}>{option.detail}</Text></View>
+                        <View style={[styles.scheduleRadio, selected && styles.scheduleRadioSelected]}>{selected ? <View style={styles.scheduleRadioDot}/> : null}</View>
+                      </Pressable>;
+                    })}
+                  </View>
+                  <Text style={styles.scheduleFooter}>{checkpointPreset === "custom" ? "Add and place your own intermediate check-ins below." : "You can still choose what each intermediate check-in collects."}</Text>
+                </View>
+                <View style={styles.checkpointTimeline}>
+                  {[...checkpoints].sort((left, right) => Number(left.dayNumber) - Number(right.dayNumber)).map((checkpoint, index, ordered) => {
+                    const fixedCheckpoint = checkpoint.kind !== "milestone";
+                    const scheduleEditable = checkpointPreset === "custom" && checkpoint.kind === "milestone";
+                    if (fixedCheckpoint) return <View key={checkpoint.id} style={styles.checkpointRow}>
+                      <View style={styles.timelineRail}><View style={[styles.timelineDot, styles.timelineDotLocked]}><Text style={styles.timelineNumber}>{index + 1}</Text></View>{index < ordered.length - 1 ? <View style={styles.timelineLine} /> : null}</View>
+                      <View style={styles.fixedCheckpointCard}>
+                        <View style={styles.fixedCheckpointTop}><View style={styles.checkpointTitleCopy}><Text style={styles.checkpointKind}>{checkpoint.kind === "start" ? "START CHECK-IN" : "FINAL CHECK-IN"}</Text><Text style={styles.fixedCheckpointTitle}>{checkpoint.label}</Text></View><Text style={styles.fixedDay}>DAY {checkpoint.dayNumber}</Text></View>
+                        <View style={styles.fixedCheckpointSummary}><Icon name="check" size={16} color={theme.colors.brandStrong}/><Text style={styles.fixedCheckpointSummaryText}>Weight, body fat & photo required</Text></View>
+                      </View>
+                    </View>;
+                    return <View key={checkpoint.id} style={styles.checkpointRow}>
+                      <View style={styles.timelineRail}><View style={styles.timelineDot}><Text style={styles.timelineNumber}>{index + 1}</Text></View>{index < ordered.length - 1 ? <View style={styles.timelineLine} /> : null}</View>
+                      <View style={styles.checkpointCard}>
+                        <View style={styles.checkpointHead}>
+                          <View style={styles.checkpointTitleCopy}><Text style={styles.checkpointKind}>MILESTONE CHECK-IN</Text>{scheduleEditable ? <TextInput value={checkpoint.label} onChangeText={(label) => updateCheckpoint(checkpoint.id, { label })} maxLength={40} returnKeyType="done" style={styles.checkpointTitle} /> : <Text style={styles.checkpointTitleLocked}>{checkpoint.label}</Text>}</View>
+                          {scheduleEditable ? <Button size="sm" variant="secondary" onPress={() => removeCheckpoint(checkpoint.id)}>Remove</Button> : null}
+                        </View>
+                        <View style={styles.dayRow}><View><Text style={styles.label}>WHEN IT HAPPENS</Text><Text style={styles.daySummary}>Day {checkpoint.dayNumber || "—"}</Text></View>{scheduleEditable ? <View style={styles.dayInputWrap}><Text style={styles.dayPrefix}>DAY</Text><TextInput value={checkpoint.dayNumber} onChangeText={(dayNumber) => updateCheckpoint(checkpoint.id, { dayNumber: dayNumber.replace(/[^0-9]/g, "") })} keyboardType="number-pad" style={styles.dayInput} /></View> : <Text style={styles.fixedDay}>DAY {checkpoint.dayNumber}</Text>}</View>
+                        <View style={styles.requirementHeader}><Text style={styles.requirementTitle}>What must they log?</Text><Text style={styles.requirementHint}>At least one</Text></View>
+                        <View style={styles.requirementRows}>
+                          <ToggleRow title="Weight" description="Record current body weight." value={checkpoint.requiresWeight} onValueChange={(requiresWeight) => updateCheckpoint(checkpoint.id, { requiresWeight })} />
+                          <ToggleRow title="Body fat" description="Record current body-fat percentage." value={checkpoint.requiresBodyFat} onValueChange={(requiresBodyFat) => updateCheckpoint(checkpoint.id, { requiresBodyFat })} />
+                          <ToggleRow title="Progress photo" description="Take a new photo or choose one from the library." value={checkpoint.requiresPhoto} onValueChange={(requiresPhoto) => updateCheckpoint(checkpoint.id, { requiresPhoto })} />
+                        </View>
+                      </View>
+                    </View>;
+                  })}
+                </View>
+                {checkpointPreset === "custom" && checkpoints.filter((checkpoint) => checkpoint.kind === "milestone").length < 3 && durationDays > 2 ? <Button variant="secondary" leadingIcon="create" onPress={addCheckpoint}>Add custom check-in</Button> : null}
+                <View style={styles.lockNote}><Icon name="flame" size={20} color={theme.colors.brandStrong}/><Text style={styles.lockNoteText}>When a check-in is due, that participant completes it before that day’s tasks unlock. Their measurements and photos stay private.</Text></View>
+              </>
+            ) : null}
+
+            {step === 3 ? (
               <>
                 <View style={styles.stepHero}>
                   <Text style={styles.eyebrow}>DAILY TASKS</Text>
@@ -296,7 +526,7 @@ export default function CreateChallengeScreen() {
               </>
             ) : null}
 
-            {step === 3 ? (
+            {step === 4 ? (
               <>
                 <View style={styles.stepHero}>
                   <Text style={styles.eyebrow}>DEFINE THE RULES</Text>
@@ -326,19 +556,21 @@ export default function CreateChallengeScreen() {
                   <Text style={styles.reviewEyebrow}>READY TO PUBLISH</Text>
                   <Text style={styles.reviewTitle}>{name}</Text>
                   <Text style={styles.reviewMeta}>{selectedIds.length} daily tasks · {dateFromValue(startsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}–{dateFromValue(endsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</Text>
-                  <Text style={styles.reviewScoring}>ShipShape Points · +1 complete · −3 missed · +{pointRules.perfectDayBonus} perfect day · +{pointRules.sevenDayStreakBonus} streak{bonusMetric === "none" ? "" : ` · ${bonusMetric === "weight" ? "weight" : "body-fat"} ${bonusCalculation === "percentage" ? "%" : "total"} bonus`}</Text>
+                  <Text style={styles.reviewScoring}>ShipShape Points · +1 complete · −3 missed · +{pointRules.perfectDayBonus} perfect day · +{pointRules.sevenDayStreakBonus} streak{weightBonusCalculation ? ` · weight ${weightBonusCalculation === "percentage" ? "%" : "total"}` : ""}{bodyFatBonusCalculation ? ` · body-fat ${bodyFatBonusCalculation === "percentage" ? "%" : "total"}` : ""}</Text>
+                  <Text style={styles.reviewMeta}>{checkpoints.length} required progress check-ins</Text>
                   <View style={styles.reviewPrize}><Icon name="trophy" size={18} color={theme.colors.brandStrong} /><Text style={styles.reviewPrizeText}>{reward}</Text></View>
                 </View>
               </>
             ) : null}
 
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           <View style={styles.footer}>
-            <Button disabled={!stepValid} loading={saving} trailingIcon={step < 3 ? "arrow-right" : undefined} onPress={primaryAction}>{step < 3 ? step === 2 ? `Set rules for ${selectedIds.length} task${selectedIds.length === 1 ? "" : "s"}` : "Continue" : startsOn <= defaults.startsOn ? "Publish and start" : "Publish challenge"}</Button>
+            <Button disabled={!stepValid} loading={saving} trailingIcon={step < 4 ? "arrow-right" : undefined} onPress={primaryAction}>{step < 4 ? step === 3 ? `Set rules for ${selectedIds.length} task${selectedIds.length === 1 ? "" : "s"}` : "Continue" : startsOn <= defaults.startsOn ? "Publish and start" : "Publish challenge"}</Button>
           </View>
-        </KeyboardAvoidingView>
+        </View>
+        <AppKeyboardToolbar />
       </View>
     </SafeAreaView>
   );
@@ -382,19 +614,75 @@ const styles = StyleSheet.create({
   alwaysOnCard: { flexDirection: "row", alignItems: "center", gap: 14, padding: 17, borderRadius: 20, backgroundColor: theme.colors.accentSoft },
   alwaysOnIcon: { width: 48, height: 48, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surface },
   alwaysOnCopy: { flex: 1, gap: 2 }, alwaysOnLabel: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "800", fontSize: 8, letterSpacing: 1 }, alwaysOnTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 17 }, alwaysOnBody: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 11, lineHeight: 16 },
+  endPointsIntro: { alignItems: "center", gap: 6, paddingTop: 6 },
+  endPointsEyebrow: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: 1.1 },
   scoringOptions: { gap: 10 },
-  scoringCard: { minHeight: 92, flexDirection: "row", alignItems: "flex-start", gap: 13, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
-  scoringCardSelected: { borderColor: theme.colors.brand, backgroundColor: theme.colors.brandSoft },
-  radio: { width: 22, height: 22, marginTop: 1, borderRadius: 11, borderWidth: 2, borderColor: theme.colors.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surface },
-  radioSelected: { borderColor: theme.colors.brand },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.brand },
-  scoringCopy: { flex: 1, gap: 6 },
-  scoringTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  scoringTitle: { flex: 1, color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 16 },
-  scoringBadge: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999, color: theme.colors.textMuted, backgroundColor: theme.colors.subtle, fontFamily: theme.type.body, fontWeight: "800", fontSize: 7, letterSpacing: 0.8 },
-  scoringBadgeSelected: { color: theme.colors.brandStrong, backgroundColor: theme.colors.surface },
-  scoringBody: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 12, lineHeight: 18 },
-  calculationCard: { alignItems: "center", gap: 11, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  endPointsCard: { padding: 12, borderRadius: 20, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, gap: 12 },
+  toggleRow: { minHeight: 70, flexDirection: "row", alignItems: "center", gap: 14, padding: 13, borderRadius: 16, backgroundColor: theme.colors.subtle },
+  toggleRowActive: { backgroundColor: theme.colors.brandSoft },
+  toggleCopy: { flex: 1, minWidth: 0, gap: 3 },
+  toggleTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 15 },
+  toggleDescription: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 11, lineHeight: 16 },
+  methodArea: { gap: 9, paddingHorizontal: 3, paddingBottom: 3 },
+  methodPicker: { flexDirection: "row", padding: 4, borderRadius: 14, backgroundColor: theme.colors.subtle },
+  methodOption: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 8, borderRadius: 11 },
+  methodOptionActive: { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.brand },
+  methodOptionText: { color: theme.colors.textMuted, fontFamily: theme.type.body, fontWeight: "800", fontSize: 12 },
+  methodOptionTextActive: { color: theme.colors.brandStrong },
+  methodHelp: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 11, lineHeight: 17 },
+  presetCard: { gap: 16, padding: 17, borderRadius: 22, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  scheduleHeader: { gap: 4 },
+  scheduleEyebrow: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: 1.1 },
+  scheduleTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 19 },
+  scheduleIntro: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 11, lineHeight: 17 },
+  scheduleGrid: { gap: 9 },
+  scheduleTile: { width: "100%", minHeight: 76, flexDirection: "row", alignItems: "center", gap: 12, padding: 10, paddingRight: 14, borderRadius: 17, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.canvas },
+  scheduleTileSelected: { borderWidth: 2, borderColor: theme.colors.brand, backgroundColor: theme.colors.brandSoft },
+  scheduleTileDisabled: { opacity: 0.4 },
+  scheduleCountBox: { width: 58, minHeight: 54, alignItems: "center", justifyContent: "center", borderRadius: 13, backgroundColor: theme.colors.subtle },
+  scheduleCountBoxSelected: { backgroundColor: theme.colors.brand },
+  scheduleCount: { color: theme.colors.text, fontFamily: theme.type.display, fontSize: 24, lineHeight: 25 },
+  scheduleCountSelected: { color: "#FFFFFF" },
+  scheduleCountLabel: { color: theme.colors.textMuted, fontFamily: theme.type.body, fontWeight: "900", fontSize: 6, letterSpacing: 0.6 },
+  scheduleCountLabelSelected: { color: "#FFFFFF" },
+  scheduleTileCopy: { flex: 1, minWidth: 0, gap: 3 },
+  scheduleTileTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 14 },
+  scheduleTileTitleSelected: { color: theme.colors.brandStrong },
+  scheduleTileDetail: { color: theme.colors.textMuted, fontFamily: theme.type.body, fontSize: 10, lineHeight: 14 },
+  scheduleRadio: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: theme.colors.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.surface },
+  scheduleRadioSelected: { borderColor: theme.colors.brand },
+  scheduleRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.brand },
+  scheduleFooter: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 10, lineHeight: 16, textAlign: "center" },
+  checkpointTimeline: { gap: 0 },
+  checkpointRow: { flexDirection: "row", alignItems: "stretch", gap: 12 },
+  timelineRail: { width: 34, alignItems: "center" },
+  timelineDot: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: theme.colors.brand, backgroundColor: theme.colors.surface },
+  timelineDotLocked: { backgroundColor: theme.colors.brand },
+  timelineNumber: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 11 },
+  timelineLine: { flex: 1, width: 2, minHeight: 18, backgroundColor: theme.colors.brandSoft },
+  checkpointCard: { flex: 1, marginBottom: 14, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, gap: 14 },
+  fixedCheckpointCard: { flex: 1, marginBottom: 14, padding: 16, borderRadius: 20, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, gap: 12 },
+  fixedCheckpointTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  fixedCheckpointTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 18, marginTop: 3 },
+  fixedCheckpointSummary: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: theme.colors.border },
+  fixedCheckpointSummaryText: { color: theme.colors.textSecondary, fontFamily: theme.type.body, fontWeight: "700", fontSize: 11 },
+  checkpointHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  checkpointTitleCopy: { flex: 1, minWidth: 0, gap: 3 },
+  checkpointKind: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: 1 },
+  checkpointTitle: { minHeight: 40, paddingHorizontal: 10, borderRadius: 11, borderWidth: 1, borderColor: theme.colors.borderStrong, color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 15 },
+  checkpointTitleLocked: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 18, lineHeight: 24 },
+  dayRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  daySummary: { marginTop: 3, color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "800", fontSize: 14 },
+  dayInputWrap: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 10, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.canvas },
+  dayPrefix: { color: theme.colors.textMuted, fontFamily: theme.type.body, fontWeight: "900", fontSize: 8, letterSpacing: 0.8 },
+  dayInput: { width: 48, minHeight: 40, paddingHorizontal: 8, color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 15 },
+  fixedDay: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "900", fontSize: 11, letterSpacing: 0.8 },
+  requirementHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingTop: 2 },
+  requirementTitle: { color: theme.colors.text, fontFamily: theme.type.body, fontWeight: "900", fontSize: 14 },
+  requirementHint: { color: theme.colors.textMuted, fontFamily: theme.type.body, fontSize: 10 },
+  requirementRows: { gap: 8 },
+  lockNote: { flexDirection: "row", alignItems: "flex-start", gap: 12, padding: 16, borderRadius: 18, backgroundColor: theme.colors.accentSoft },
+  lockNoteText: { flex: 1, color: theme.colors.textSecondary, fontFamily: theme.type.body, fontSize: 12, lineHeight: 18 },
   countBadge: { flexDirection: "row", alignItems: "baseline", gap: 6, marginTop: 6, paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, backgroundColor: theme.colors.brandSoft },
   countValue: { color: theme.colors.brandStrong, fontFamily: theme.type.display, fontSize: 23 },
   countLabel: { color: theme.colors.brandStrong, fontFamily: theme.type.body, fontWeight: "800", fontSize: 8, letterSpacing: 1 },

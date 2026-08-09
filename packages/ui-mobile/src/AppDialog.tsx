@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Button, type ButtonProps } from "./Button";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { theme } from "./theme";
 
 export interface AppDialogAction {
@@ -14,7 +14,7 @@ export interface AppDialogOptions {
   eyebrow?: string;
   title: string;
   message: string;
-  icon?: "trophy" | "check" | "alert" | "flame";
+  icon?: IconName;
   actions?: AppDialogAction[];
   dismissible?: boolean;
 }

@@ -1,7 +1,12 @@
 import type { Session } from "@supabase/supabase-js";
 import * as AppleAuthentication from "expo-apple-authentication";
+import { makeRedirectUri } from "expo-auth-session";
+import * as QueryParams from "expo-auth-session/build/QueryParams";
 import * as Crypto from "expo-crypto";
+import * as WebBrowser from "expo-web-browser";
 import { supabase } from "../../lib/supabase";
+
+WebBrowser.maybeCompleteAuthSession();
 
 export type OtpDestination = { kind: "email"; value: string };
 
@@ -89,6 +94,54 @@ export async function signInWithApple(): Promise<Session> {
     if (updateError) throw updateError;
   }
   return data.session;
+}
+
+const googleRedirectTo = makeRedirectUri({ scheme: "shipshape90", path: "auth/callback" });
+
+async function createSessionFromOAuthUrl(url: string): Promise<Session> {
+  if (!supabase) throw new Error("Hosted authentication is not configured.");
+  const { params, errorCode } = QueryParams.getQueryParams(url);
+  if (errorCode) throw new Error(typeof params.error_description === "string" ? params.error_description : errorCode);
+
+  const accessToken = typeof params.access_token === "string" ? params.access_token : null;
+  const refreshToken = typeof params.refresh_token === "string" ? params.refresh_token : null;
+  if (accessToken && refreshToken) {
+    const { data, error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (error) throw error;
+    if (!data.session) throw new Error("Google sign-in could not be completed.");
+    return data.session;
+  }
+
+  const code = typeof params.code === "string" ? params.code : null;
+  if (code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
+    if (!data.session) throw new Error("Google sign-in could not be completed.");
+    return data.session;
+  }
+
+  throw new Error("Google did not return a valid sign-in session.");
+}
+
+export async function signInWithGoogle(): Promise<Session | null> {
+  if (!supabase) throw new Error("Hosted authentication is not configured.");
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: googleRedirectTo,
+      skipBrowserRedirect: true,
+      queryParams: { prompt: "select_account" },
+    },
+  });
+  if (error) throw error;
+  if (!data.url) throw new Error("Google sign-in could not be opened.");
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, googleRedirectTo, {
+    preferEphemeralSession: false,
+  });
+  if (result.type === "cancel" || result.type === "dismiss") return null;
+  if (result.type !== "success") throw new Error("Google sign-in could not be completed.");
+  return createSessionFromOAuthUrl(result.url);
 }
 
 export async function requestOtp(destination: OtpDestination): Promise<void> {

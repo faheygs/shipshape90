@@ -2,10 +2,12 @@ import { Button, Icon, theme } from "@shipshape/ui-mobile";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../src/features/auth/AuthProvider";
 import { isProfileHandleAvailable, saveProfile, uploadProfileAvatar } from "../src/features/auth/authRepository";
+import { AppKeyboardToolbar } from "../src/components/AppKeyboardToolbar";
 
 type HandleStatus = "idle" | "checking" | "available" | "taken";
 
@@ -81,8 +83,8 @@ export default function ProfileSetupScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <View style={styles.flex}>
+        <KeyboardAwareScrollView bottomOffset={62} contentContainerStyle={styles.content} keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.eyebrow}>ONE LAST THING</Text>
           <Text style={styles.title}>Make it yours.</Text>
           <Text style={styles.subtitle}>{"This is how you'll appear in challenges."}</Text>
@@ -132,8 +134,9 @@ export default function ProfileSetupScreen() {
 
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <Button disabled={!valid} loading={loading} onPress={submit}>Explore challenges</Button>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
+      </View>
+      <AppKeyboardToolbar />
     </SafeAreaView>
   );
 }

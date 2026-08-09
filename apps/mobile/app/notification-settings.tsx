@@ -1,6 +1,6 @@
 import { BackButton, Button, Icon, theme } from "@shipshape/ui-mobile";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Linking, StyleSheet, Switch, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { disablePushNotifications, enablePushNotifications, pushNotificationsAreEnabled } from "../src/features/notifications/pushNotifications";
@@ -11,9 +11,12 @@ export default function NotificationSettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
     void pushNotificationsAreEnabled().then(setEnabled).catch((caught) => setError(caught instanceof Error ? caught.message : "Notification settings couldn't be loaded.")).finally(() => setLoading(false));
   }, []);
+  useFocusEffect(refresh);
 
   const change = async (next: boolean) => {
     setSaving(true);
@@ -21,7 +24,7 @@ export default function NotificationSettingsScreen() {
     try {
       if (next) await enablePushNotifications();
       else await disablePushNotifications();
-      setEnabled(next);
+      setEnabled(await pushNotificationsAreEnabled());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Notification settings couldn't be changed.");
     } finally {

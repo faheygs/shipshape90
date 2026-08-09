@@ -9,6 +9,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BodyProgressPanel } from "../../src/components/BodyProgressPanel";
 import { ChallengeHistoryPanel } from "../../src/components/ChallengeHistoryPanel";
 import { GameLeaderboard } from "../../src/components/GameLeaderboard";
+import { RequiredCheckinGate } from "../../src/components/RequiredCheckinGate";
+import { challengeCheckinKeys, useChallengeCheckins } from "../../src/features/checkins/useChallengeCheckins";
 import { challengeKeys, useChallenges, useLeaveChallenge } from "../../src/features/challenges/useChallenges";
 import { communityKeys, useChallengeActivity } from "../../src/features/community/useCommunityActivity";
 import { challengeHistoryKeys } from "../../src/features/history/useChallengeHistory";
@@ -40,6 +42,7 @@ export default function ActiveChallengeScreen() {
   const leave = useLeaveChallenge();
   const challenges = useChallenges();
   const todayTasks = useTodayTasks(id);
+  const checkins = useChallengeCheckins(id);
   const submitDay = useSubmitChallengeDay(id);
   const leaderboard = useChallengeLeaderboard(id);
   const perfectDayStreak = useMyPerfectDayStreak(id);
@@ -50,7 +53,7 @@ export default function ActiveChallengeScreen() {
   const tasks = todayTasks.data ?? [];
   const pointRules = getShipShapePointRules(tasks.length);
   const pendingTasks = tasks.filter((task) => task.status === "pending");
-  const done = tasks.filter((task) => task.status === "complete" || task.status === "pending_review").length;
+  const done = tasks.filter((task) => task.status === "complete").length;
   const readyDone = done + selectedIds.length;
   const progress = tasks.length === 0 ? 0 : Math.round((readyDone / tasks.length) * 100);
   const selectedTaskPoints = tasks.filter((task) => selectedIds.includes(task.occurrenceId)).reduce((total, task) => total + task.points, 0);
@@ -60,9 +63,11 @@ export default function ActiveChallengeScreen() {
   const projectedPoints = selectedTaskPoints - missedPenaltyPoints + (willPerfect ? pointRules.perfectDayBonus : 0) + (willPerfect && ((perfectDayStreak.data ?? 0) + 1) % 7 === 0 ? pointRules.sevenDayStreakBonus : 0);
   const challengeName = challenge?.name ?? "Active challenge";
   const currentStanding = leaderboard.data?.find((entry) => entry.isCurrentUser);
-  const bonusMetric = challenge?.bonusMetric ?? currentStanding?.bonusMetric ?? "none";
-  const bonusCalculation = challenge?.bonusCalculation ?? currentStanding?.bonusCalculation ?? null;
-  const scoringRule = `+1 point per completed task. −3 points per missed task. With ${tasks.length || "the scheduled"} daily tasks, a perfect day adds +${pointRules.perfectDayBonus} and every 7-day perfect streak adds +${pointRules.sevenDayStreakBonus}.${bonusMetric === "none" ? "" : ` ${bonusMetric === "weight" ? "Weight" : "Body-fat"} ${bonusCalculation === "percentage" ? "percentage" : "total"} change adds bonus points.`}`;
+  const weightBonusCalculation = challenge?.weightBonusCalculation ?? currentStanding?.weightBonusCalculation ?? null;
+  const bodyFatBonusCalculation = challenge?.bodyFatBonusCalculation ?? currentStanding?.bodyFatBonusCalculation ?? null;
+  const blockingCheckpoint = checkins.data?.find((checkpoint) => checkpoint.isBlocking);
+  const bonusRules = [weightBonusCalculation ? `Weight ${weightBonusCalculation === "percentage" ? "percentage" : "total"} change` : "", bodyFatBonusCalculation ? `body-fat ${bodyFatBonusCalculation === "percentage" ? "percentage" : "total"} change` : ""].filter(Boolean).join(" and ");
+  const scoringRule = `+1 point per completed task. −3 points per missed task. With ${tasks.length || "the scheduled"} daily tasks, a perfect day adds +${pointRules.perfectDayBonus} and every 7-day perfect streak adds +${pointRules.sevenDayStreakBonus}.${bonusRules ? ` ${bonusRules} add independent bonus points.` : ""}`;
 
   useEffect(() => {
     let unsubscribe: () => void = () => undefined;
@@ -74,6 +79,7 @@ export default function ActiveChallengeScreen() {
       void queryClient.invalidateQueries({ queryKey: leaderboardKeys.detail(id) });
       void queryClient.invalidateQueries({ queryKey: leaderboardKeys.streak(id) });
       void queryClient.invalidateQueries({ queryKey: todayTaskKeys.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: challengeCheckinKeys.detail(id) });
     }).then((cleanup) => { unsubscribe = cleanup; }).catch(() => undefined);
     return () => unsubscribe();
   }, [id, queryClient]);
@@ -97,15 +103,19 @@ export default function ActiveChallengeScreen() {
 
   return <SafeAreaView style={styles.safe}>
     <View style={styles.topBar}><BackButton onPress={() => router.back()} /><View style={styles.topCopy}><Text style={styles.challengeName}>{challengeName}</Text><Text style={styles.day}>{challenge?.isOwner ? "HOSTING · ACTIVE CHALLENGE" : "ACTIVE CHALLENGE"}</Text></View><View style={styles.pointsPill}><Text style={styles.pointsPillValue}>{formatPoints(currentStanding?.totalScore ?? 0)}</Text><Text style={styles.pointsPillLabel}>POINTS{currentStanding ? ` · #${currentStanding.rank}` : ""}</Text></View>{challenge?.isOwner ? <Pressable accessibilityRole="button" accessibilityLabel="Manage challenge" onPress={() => router.push({ pathname: "/manage-challenge/[id]", params: { id } })} style={({ pressed }) => [styles.manageButton, pressed && styles.manageButtonPressed]}><Icon name="settings" size={20} color={theme.colors.brandStrong}/></Pressable> : null}</View>
-    <View style={styles.tabs}>{sections.map((item) => <Pressable key={item.id} onPress={() => setSection(item.id)} style={[styles.tab, section === item.id && styles.tabActive]}><Text style={[styles.tabText, section === item.id && styles.tabTextActive]}>{item.label}</Text></Pressable>)}</View>
+    <View accessibilityRole="tablist" style={styles.tabs}>{sections.map((item) => <Pressable key={item.id} accessibilityRole="tab" accessibilityLabel={`${item.label} challenge tab`} accessibilityState={{ selected: section === item.id }} onPress={() => setSection(item.id)} style={[styles.tab, section === item.id && styles.tabActive]}><Text style={[styles.tabText, section === item.id && styles.tabTextActive]}>{item.label}</Text></Pressable>)}</View>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {section === "today" ? <>
         <View style={styles.todayHead}><View style={styles.todayCopy}><Text style={styles.eyebrow}>{new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</Text><Text style={styles.title}>Own today.</Text><Text style={styles.subtitle}>Tap a task when it’s yours. Build your run, then submit the day.</Text></View><View style={styles.streak}><Text style={styles.streakValue}>{currentStanding?.perfectDays ?? 0}</Text><Text style={styles.streakLabel}>PERFECT DAYS</Text></View></View>
-        <View style={styles.questCard}><View style={styles.questTop}><View><Text style={styles.questEyebrow}>TODAY’S TASKS</Text><Text style={styles.questCount}>{readyDone}<Text style={styles.questMax}> / {tasks.length}</Text></Text><Text style={styles.questLabel}>TASKS DONE</Text></View><View style={[styles.pointsPreview, projectedPoints > 0 && styles.pointsPreviewReady, projectedPoints < 0 && styles.pointsPreviewDanger]}><Text style={[styles.pointsPreviewValue, projectedPoints < 0 && styles.pointsPreviewValueDanger]}>{signedPoints(projectedPoints)}</Text><Text style={[styles.pointsPreviewLabel, projectedPoints < 0 && styles.pointsPreviewLabelDanger]}>POINTS IF SUBMITTED</Text></View></View><View style={styles.questTrack}><View style={[styles.questFill,{width:`${progress}%`}]} /></View><View style={styles.questFooter}><Text style={styles.questFooterText}>{readyDone === tasks.length && tasks.length ? "PERFECT DAY READY" : `${tasks.length - readyDone} TASK${tasks.length - readyDone === 1 ? "" : "S"} LEFT`}</Text>{willPerfect ? <Text style={styles.perfectBonus}>+{pointRules.perfectDayBonus} PERFECT DAY</Text> : missedOnSubmit > 0 ? <Text style={styles.penaltyPreview}>−{missedPenaltyPoints} MISS PENALTY</Text> : null}</View></View>
-        <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today’s tasks</Text><Text style={styles.sectionMeta}>{readyDone}/{tasks.length}</Text></View><Text style={styles.selectionHelp}>Tap the whole card to power it up or change your mind.</Text>
-        {todayTasks.isLoading ? <Text style={styles.subtitle}>Loading today’s tasks…</Text> : null}{todayTasks.isError ? <Text style={styles.errorText}>Today’s tasks couldn’t be loaded.</Text> : null}
-        <View style={styles.taskList}>{tasks.map((task) => { const state: TaskCheckState = task.status === "complete" || task.status === "pending_review" ? "complete" : task.status === "missed" ? "missed" : task.status === "excused" ? "locked" : selectedIds.includes(task.occurrenceId) ? "selected" : "pending"; return <TaskCheck key={task.occurrenceId} title={task.title} meta={task.meta} points={task.points} state={state} onPress={state === "pending" || state === "selected" ? () => toggleTask(task.occurrenceId) : undefined}/>; })}</View>
-        <Button loading={submitDay.isPending} disabled={!pendingTasks.length} onPress={submitSelected}>Submit day</Button>
+        {checkins.isLoading ? <Text style={styles.subtitle}>Checking today’s progress marker…</Text> : null}
+        {checkins.isError ? <Text style={styles.errorText}>Required check-ins couldn’t be loaded.</Text> : null}
+        {blockingCheckpoint ? <RequiredCheckinGate key={blockingCheckpoint.id} challengeId={id} checkpoint={blockingCheckpoint}/> : checkins.isSuccess ? <>
+          <View style={styles.questCard}><View style={styles.questTop}><View><Text style={styles.questEyebrow}>TODAY’S TASKS</Text><Text style={styles.questCount}>{readyDone}<Text style={styles.questMax}> / {tasks.length}</Text></Text><Text style={styles.questLabel}>TASKS DONE</Text></View><View style={[styles.pointsPreview, projectedPoints > 0 && styles.pointsPreviewReady, projectedPoints < 0 && styles.pointsPreviewDanger]}><Text style={[styles.pointsPreviewValue, projectedPoints < 0 && styles.pointsPreviewValueDanger]}>{signedPoints(projectedPoints)}</Text><Text style={[styles.pointsPreviewLabel, projectedPoints < 0 && styles.pointsPreviewLabelDanger]}>POINTS IF SUBMITTED</Text></View></View><View style={styles.questTrack}><View style={[styles.questFill,{width:`${progress}%`}]} /></View><View style={styles.questFooter}><Text style={styles.questFooterText}>{readyDone === tasks.length && tasks.length ? "PERFECT DAY READY" : `${tasks.length - readyDone} TASK${tasks.length - readyDone === 1 ? "" : "S"} LEFT`}</Text>{willPerfect ? <Text style={styles.perfectBonus}>+{pointRules.perfectDayBonus} PERFECT DAY</Text> : missedOnSubmit > 0 ? <Text style={styles.penaltyPreview}>−{missedPenaltyPoints} MISS PENALTY</Text> : null}</View></View>
+          <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today’s tasks</Text><Text style={styles.sectionMeta}>{readyDone}/{tasks.length}</Text></View><Text style={styles.selectionHelp}>Tap the whole card to power it up or change your mind.</Text>
+          {todayTasks.isLoading ? <Text style={styles.subtitle}>Loading today’s tasks…</Text> : null}{todayTasks.isError ? <Text style={styles.errorText}>Today’s tasks couldn’t be loaded.</Text> : null}
+          <View style={styles.taskList}>{tasks.map((task) => { const state: TaskCheckState = task.status === "complete" ? "complete" : task.status === "missed" ? "missed" : task.status === "excused" ? "locked" : selectedIds.includes(task.occurrenceId) ? "selected" : "pending"; return <TaskCheck key={task.occurrenceId} title={task.title} meta={task.meta} points={task.points} state={state} onPress={state === "pending" || state === "selected" ? () => toggleTask(task.occurrenceId) : undefined}/>; })}</View>
+          <Button loading={submitDay.isPending} disabled={!pendingTasks.length} onPress={submitSelected}>Submit day</Button>
+        </> : null}
       </> : null}
 
       {section === "leaderboard" ? <><Text style={styles.eyebrow}>LIVE ARENA</Text><Text style={styles.title}>Who’s out front?</Text><Text style={styles.subtitle}>{scoringRule}</Text>{leaderboard.isLoading ? <Text style={styles.subtitle}>Opening the arena…</Text> : null}{leaderboard.isError ? <Text style={styles.errorText}>The ranks couldn’t be loaded.</Text> : null}<GameLeaderboard entries={leaderboard.data ?? []}/></> : null}

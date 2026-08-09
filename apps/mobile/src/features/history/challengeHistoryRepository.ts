@@ -64,15 +64,14 @@ const demoTasksFor = (localDate: string): TodayTask[] => Array.from({ length: 5 
 
 const mapTask = (row: ChallengeDayRow): TodayTask => {
   const target = row.target_value == null ? "" : `${row.target_value}${row.unit ? ` ${row.unit}` : ""}`;
-  const proof = row.proof_policy === "required" ? "Proof required" : row.proof_policy === "optional" ? "Proof optional" : "";
   return {
     occurrenceId: row.occurrence_id,
     taskDefinitionId: row.task_definition_id,
     title: row.title,
-    meta: [target, row.instructions, proof].filter(Boolean).join(" · "),
+    meta: [target, row.instructions].filter(Boolean).join(" · "),
     points: row.points,
     proofPolicy: row.proof_policy,
-    status: row.status,
+    status: row.status === "pending_review" ? "complete" : row.status,
   };
 };
 
