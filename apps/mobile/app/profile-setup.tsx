@@ -63,7 +63,7 @@ export default function ProfileSetupScreen() {
       const avatarPath = avatar ? await uploadProfileAvatar(avatar) : undefined;
       await saveProfile({ displayName: name, handle: normalized, avatarPath });
       await refreshProfile();
-      router.replace("/(tabs)/challenges");
+      router.replace("/(tabs)/home");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "We couldn't save your profile.";
       if (message.toLowerCase().includes("username") && message.toLowerCase().includes("taken")) setHandleStatus("taken");
@@ -133,7 +133,7 @@ export default function ProfileSetupScreen() {
           </View>
 
           {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-          <Button disabled={!valid} loading={loading} onPress={submit}>Explore challenges</Button>
+          <Button disabled={!valid} loading={loading} onPress={submit}>Go to home</Button>
         </KeyboardAwareScrollView>
       </View>
       <AppKeyboardToolbar />

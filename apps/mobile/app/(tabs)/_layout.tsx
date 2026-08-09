@@ -65,7 +65,7 @@ export default function TabLayout() {
     return () => unsubscribe();
   }, [profile?.id, queryClient]);
 
-  return <Tabs screenOptions={({ route }) => ({ headerShown: false, tabBarHideOnKeyboard: true, tabBarActiveTintColor: theme.colors.brand, tabBarInactiveTintColor: theme.colors.textMuted, tabBarStyle: styles.bar, tabBarLabelStyle: styles.label, tabBarIcon: ({ color, focused }) => <Icon name={icons[route.name] ?? "home"} color={color} size={route.name === "create" ? 26 : 22} strokeWidth={focused ? 2.35 : 1.8} /> })}>
+  return <Tabs initialRouteName="home" screenOptions={({ route }) => ({ headerShown: false, tabBarHideOnKeyboard: true, tabBarActiveTintColor: theme.colors.brand, tabBarInactiveTintColor: theme.colors.textMuted, tabBarStyle: styles.bar, tabBarLabelStyle: styles.label, tabBarIcon: ({ color, focused }) => <Icon name={icons[route.name] ?? "home"} color={color} size={route.name === "create" ? 26 : 22} strokeWidth={focused ? 2.35 : 1.8} /> })}>
     <Tabs.Screen name="home" options={{ title: "Home" }} />
     <Tabs.Screen name="challenges" options={{ title: "Challenges" }} />
     <Tabs.Screen name="create" options={{ title: "Create" }} />

@@ -31,7 +31,7 @@ export default function VerifyScreen() {
     try {
       await verifyOtp({ kind: "email", value: params.value }, code);
       const profile = await getCurrentProfile();
-      router.replace(profile ? "/(tabs)/challenges" : "/profile-setup");
+      router.replace(profile ? "/(tabs)/home" : "/profile-setup");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "That code didn't work.");
     } finally {

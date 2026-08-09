@@ -7,5 +7,5 @@ export default function Index() {
   if (isPreview) return <Redirect href="/(tabs)/home" />;
   if (!session) return <Redirect href="/welcome" />;
   if (!profile) return <Redirect href="/profile-setup" />;
-  return <Redirect href="/(tabs)/challenges" />;
+  return <Redirect href="/(tabs)/home" />;
 }

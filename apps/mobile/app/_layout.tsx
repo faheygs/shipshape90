@@ -56,7 +56,7 @@ function AuthGate() {
     }
 
     if (session && profile && (isPublicRoute || isProfileSetup || isIndex)) {
-      router.replace("/(tabs)/challenges");
+      router.replace("/(tabs)/home");
     }
   }, [isLoading, isPreview, navigationState?.key, profile, segments, session]);
 

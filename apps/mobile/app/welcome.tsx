@@ -42,7 +42,7 @@ export default function WelcomeScreen() {
     try {
       await signInWithApple();
       const profile = await getCurrentProfile();
-      router.replace(profile ? "/(tabs)/challenges" : "/profile-setup");
+      router.replace(profile ? "/(tabs)/home" : "/profile-setup");
     } catch (caught) {
       if (!(caught && typeof caught === "object" && "code" in caught && caught.code === "ERR_REQUEST_CANCELED")) {
         setError(caught instanceof Error ? caught.message : "Apple sign-in couldn't be completed.");
@@ -59,7 +59,7 @@ export default function WelcomeScreen() {
       const session = await signInWithGoogle();
       if (!session) return;
       const profile = await getCurrentProfile();
-      router.replace(profile ? "/(tabs)/challenges" : "/profile-setup");
+      router.replace(profile ? "/(tabs)/home" : "/profile-setup");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Google sign-in couldn't be completed.");
     } finally {
