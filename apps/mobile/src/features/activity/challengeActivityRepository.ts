@@ -1,5 +1,6 @@
 import type { ActivityEntry } from "@shipshape/api";
 import { supabase } from "../../lib/supabase";
+import { challengeActivityEventTypes, isChallengeActivityEventType } from "./activityFeedPolicy";
 
 interface ActivityRow {
   id: string;
@@ -20,10 +21,11 @@ export async function listChallengeActivity(challengeId: string): Promise<Activi
     .from("activity_entries")
     .select(activitySelection)
     .eq("challenge_id", challengeId)
+    .in("event_type", [...challengeActivityEventTypes])
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw error;
-  return ((data ?? []) as ActivityRow[]).map((row) => {
+  return ((data ?? []) as ActivityRow[]).filter((row) => isChallengeActivityEventType(row.event_type)).map((row) => {
     const actor = Array.isArray(row.actor) ? row.actor[0] : row.actor;
     return { id: row.id, challengeId: row.challenge_id, actorProfileId: row.actor_profile_id, actorName: actor?.display_name ?? "ShipShape member", actorHandle: actor?.handle ?? "member", actorAvatarPath: actor?.avatar_path ?? null, eventType: row.event_type, body: row.body, metadata: row.metadata, createdAt: row.created_at };
   });

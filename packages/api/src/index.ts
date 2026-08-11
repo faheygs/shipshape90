@@ -70,7 +70,7 @@ export const activityEntrySchema = z.object({
   actorName: z.string(),
   actorHandle: z.string(),
   actorAvatarPath: z.string().nullable(),
-  eventType: z.enum(["member_joined", "task_completed", "perfect_day", "streak", "rank_change", "announcement", "post"]),
+  eventType: z.enum(["member_joined", "task_completed", "perfect_day", "streak", "rank_change", "announcement", "post", "day_submitted"]),
   body: z.string().nullable(),
   metadata: z.record(z.string(), z.unknown()),
   createdAt: z.iso.datetime(),
