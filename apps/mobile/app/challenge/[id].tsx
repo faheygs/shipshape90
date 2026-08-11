@@ -9,11 +9,12 @@ import { BodyProgressPanel } from "../../src/components/BodyProgressPanel";
 import { ChallengeHistoryPanel } from "../../src/components/ChallengeHistoryPanel";
 import { GameLeaderboard } from "../../src/components/GameLeaderboard";
 import { RequiredCheckinGate } from "../../src/components/RequiredCheckinGate";
+import { useAuth } from "../../src/features/auth/AuthProvider";
 import { useChallengeCheckins } from "../../src/features/checkins/useChallengeCheckins";
 import { useChallenges, useLeaveChallenge } from "../../src/features/challenges/useChallenges";
 import { useChallengeActivity } from "../../src/features/activity/useChallengeActivity";
 import { useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
-import { useSubmitChallengeDay, useTodayTasks } from "../../src/features/tasks/useTodayTasks";
+import { useSubmitChallengeDay, useTaskSelectionDraft, useTodayTasks } from "../../src/features/tasks/useTodayTasks";
 
 type ChallengeSection = "today" | "leaderboard" | "progress" | "activity" | "history";
 const sections: { id: ChallengeSection; label: string }[] = [
@@ -35,6 +36,7 @@ const activityTitle = (entry: { actorName: string; eventType: string; metadata: 
 export default function ActiveChallengeScreen() {
   const { id = "shipshape-90" } = useLocalSearchParams<{ id: string }>();
   const { showDialog } = useAppDialog();
+  const { session } = useAuth();
   const leave = useLeaveChallenge();
   const challenges = useChallenges();
   const todayTasks = useTodayTasks(id);
@@ -44,9 +46,10 @@ export default function ActiveChallengeScreen() {
   const perfectDayStreak = useMyPerfectDayStreak(id);
   const challengeActivity = useChallengeActivity(id);
   const [section, setSection] = useState<ChallengeSection>("today");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const challenge = useMemo(() => challenges.data?.find((item) => item.id === id), [challenges.data, id]);
   const tasks = todayTasks.data ?? [];
+  const taskDraft = useTaskSelectionDraft(session?.user.id ?? "preview", id, tasks, todayTasks.isSuccess);
+  const selectedIds = taskDraft.selectedIds;
   const pointRules = getShipShapePointRules(tasks.length);
   const pendingTasks = tasks.filter((task) => task.status === "pending");
   const done = tasks.filter((task) => task.status === "complete").length;
@@ -67,7 +70,7 @@ export default function ActiveChallengeScreen() {
 
   const toggleTask = (occurrenceId: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSelectedIds((current) => current.includes(occurrenceId) ? current.filter((item) => item !== occurrenceId) : [...current, occurrenceId]);
+    taskDraft.toggle(occurrenceId);
   };
   const confirmLeave = () => showDialog({
     icon: "alert", eyebrow: "PERMANENT ACTION", title: `Leave ${challengeName}?`, message: "You will forfeit prize eligibility and can never rejoin this challenge.",
@@ -78,7 +81,7 @@ export default function ActiveChallengeScreen() {
     const willLosePoints = projectedPoints < 0;
     showDialog({
       icon: willFinishDay ? "flame" : willLosePoints ? "alert" : "trophy", eyebrow: willFinishDay ? "PERFECT DAY READY" : "FINAL SCORE CHECK", title: willFinishDay ? "Lock in the whole day?" : `Submit for ${signedPoints(projectedPoints)} points?`, message: willFinishDay ? `Every task is powered up. You’ll add ${signedPoints(projectedPoints)} points.` : `${selectedIds.length} completed · ${missedOnSubmit} missed. Missed tasks close permanently at −3 points each.`,
-      actions: [{ label: "Keep editing", variant: "secondary" }, { label: "Submit day", ...(willLosePoints ? { variant: "danger" as const } : {}), onPress: () => submitDay.mutate(selectedIds, { onSuccess: (result) => { void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); setSelectedIds([]); showDialog({ icon: willFinishDay ? "flame" : "trophy", eyebrow: willFinishDay ? "DAY COMPLETE" : "POINTS POSTED", title: willFinishDay ? "You owned today." : `${signedPoints(result.awardedPoints)} points`, message: `Your points and every competitor’s leaderboard updated immediately.` }); }, onError: (error) => showDialog({ icon: "alert", title: "Couldn’t submit today.", message: error instanceof Error ? error.message : "Please try again." }) }) }],
+      actions: [{ label: "Keep editing", variant: "secondary" }, { label: "Submit day", ...(willLosePoints ? { variant: "danger" as const } : {}), onPress: () => submitDay.mutate(selectedIds, { onSuccess: (result) => { void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); taskDraft.clear(); showDialog({ icon: willFinishDay ? "flame" : "trophy", eyebrow: willFinishDay ? "DAY COMPLETE" : "POINTS POSTED", title: willFinishDay ? "You owned today." : `${signedPoints(result.awardedPoints)} points`, message: `Your points and every competitor’s leaderboard updated immediately.` }); }, onError: (error) => showDialog({ icon: "alert", title: "Couldn’t submit today.", message: error instanceof Error ? error.message : "Please try again." }) }) }],
     });
   };
 
@@ -94,7 +97,7 @@ export default function ActiveChallengeScreen() {
           <View style={styles.questCard}><View style={styles.questTop}><View><Text style={styles.questEyebrow}>TODAY’S TASKS</Text><Text style={styles.questCount}>{readyDone}<Text style={styles.questMax}> / {tasks.length}</Text></Text><Text style={styles.questLabel}>TASKS DONE</Text></View><View style={[styles.pointsPreview, projectedPoints > 0 && styles.pointsPreviewReady, projectedPoints < 0 && styles.pointsPreviewDanger]}><Text style={[styles.pointsPreviewValue, projectedPoints < 0 && styles.pointsPreviewValueDanger]}>{signedPoints(projectedPoints)}</Text><Text style={[styles.pointsPreviewLabel, projectedPoints < 0 && styles.pointsPreviewLabelDanger]}>POINTS IF SUBMITTED</Text></View></View><View style={styles.questTrack}><View style={[styles.questFill,{width:`${progress}%`}]} /></View><View style={styles.questFooter}><Text style={styles.questFooterText}>{readyDone === tasks.length && tasks.length ? "PERFECT DAY READY" : `${tasks.length - readyDone} TASK${tasks.length - readyDone === 1 ? "" : "S"} LEFT`}</Text>{willPerfect ? <Text style={styles.perfectBonus}>+{pointRules.perfectDayBonus} PERFECT DAY</Text> : missedOnSubmit > 0 ? <Text style={styles.penaltyPreview}>−{missedPenaltyPoints} MISS PENALTY</Text> : null}</View></View>
           <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today’s tasks</Text><Text style={styles.sectionMeta}>{readyDone}/{tasks.length}</Text></View><Text style={styles.selectionHelp}>Tap the whole card to power it up or change your mind.</Text>
           {todayTasks.isLoading ? <Text style={styles.subtitle}>Loading today’s tasks…</Text> : null}{todayTasks.isError ? <Text style={styles.errorText}>Today’s tasks couldn’t be loaded.</Text> : null}
-          <View style={styles.taskList}>{tasks.map((task) => { const state: TaskCheckState = task.status === "complete" ? "complete" : task.status === "missed" ? "missed" : task.status === "excused" ? "locked" : selectedIds.includes(task.occurrenceId) ? "selected" : "pending"; return <TaskCheck key={task.occurrenceId} title={task.title} meta={task.meta} points={task.points} state={state} onPress={state === "pending" || state === "selected" ? () => toggleTask(task.occurrenceId) : undefined}/>; })}</View>
+          <View style={styles.taskList}>{tasks.map((task) => { const state: TaskCheckState = task.status === "complete" ? "complete" : task.status === "missed" ? "missed" : task.status === "excused" ? "locked" : selectedIds.includes(task.occurrenceId) ? "selected" : "pending"; return <TaskCheck key={task.occurrenceId} title={task.title} meta={task.meta} points={task.points} state={state} onPress={taskDraft.isReady && (state === "pending" || state === "selected") ? () => toggleTask(task.occurrenceId) : undefined}/>; })}</View>
           <Button loading={submitDay.isPending} disabled={!pendingTasks.length} onPress={submitSelected}>Submit day</Button>
         </> : null}
       </> : null}

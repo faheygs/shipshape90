@@ -1,10 +1,13 @@
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { challengeActivityKeys } from "../activity/useChallengeActivity";
 import { leaderboardKeys } from "../leaderboard/useChallengeLeaderboard";
-import { completeTodayTask, listTodayTasks, submitChallengeDay, type TodayTask } from "./taskRepository";
+import { completeTodayTask, currentLocalDate, listTodayTasks, submitChallengeDay, type TodayTask } from "./taskRepository";
+import { loadTaskSelectionDraft, reconcileTaskSelectionDraft, saveTaskSelectionDraft, taskSelectionDraftKey } from "./taskSelectionDraftRepository";
 
 export const todayTaskKeys = {
   detail: (challengeId: string) => ["today-tasks", challengeId] as const,
+  selectionDraft: (userId: string, challengeId: string, localDate: string) => ["task-selection-draft", userId, challengeId, localDate] as const,
 };
 
 export function useTodayTasks(challengeId: string) {
@@ -13,6 +16,49 @@ export function useTodayTasks(challengeId: string) {
     queryFn: () => listTodayTasks(challengeId),
     enabled: Boolean(challengeId),
   });
+}
+
+export function useTaskSelectionDraft(userId: string, challengeId: string, tasks: TodayTask[], tasksLoaded: boolean) {
+  const queryClient = useQueryClient();
+  const localDate = currentLocalDate();
+  const storageKey = useMemo(() => taskSelectionDraftKey(userId, challengeId, localDate), [challengeId, localDate, userId]);
+  const queryKey = useMemo(() => todayTaskKeys.selectionDraft(userId, challengeId, localDate), [challengeId, localDate, userId]);
+  const writeQueue = useRef(Promise.resolve());
+  const pendingIds = useMemo(() => tasks.filter((task) => task.status === "pending").map((task) => task.occurrenceId), [tasks]);
+  const draft = useQuery({
+    queryKey,
+    queryFn: () => loadTaskSelectionDraft(storageKey),
+    enabled: Boolean(userId && challengeId),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+  const selectedIds = useMemo(
+    () => tasksLoaded ? reconcileTaskSelectionDraft(draft.data ?? [], pendingIds) : (draft.data ?? []),
+    [draft.data, pendingIds, tasksLoaded],
+  );
+
+  const persist = useCallback((nextIds: string[]) => {
+    queryClient.setQueryData<string[]>(queryKey, nextIds);
+    writeQueue.current = writeQueue.current.catch(() => undefined).then(() => saveTaskSelectionDraft(storageKey, nextIds));
+  }, [queryClient, queryKey, storageKey]);
+
+  useEffect(() => {
+    if (!draft.isSuccess || !tasksLoaded) return;
+    const storedIds = draft.data ?? [];
+    if (storedIds.length === selectedIds.length && storedIds.every((id, index) => id === selectedIds[index])) return;
+    persist(selectedIds);
+  }, [draft.data, draft.isSuccess, persist, selectedIds, tasksLoaded]);
+
+  const toggle = useCallback((occurrenceId: string) => {
+    if (!draft.isSuccess || !tasksLoaded) return;
+    persist(selectedIds.includes(occurrenceId)
+      ? selectedIds.filter((id) => id !== occurrenceId)
+      : [...selectedIds, occurrenceId]);
+  }, [draft.isSuccess, persist, selectedIds, tasksLoaded]);
+
+  const clear = useCallback(() => persist([]), [persist]);
+
+  return { selectedIds, toggle, clear, isReady: draft.isSuccess && tasksLoaded };
 }
 
 export function useSubmitChallengeDay(challengeId: string) {

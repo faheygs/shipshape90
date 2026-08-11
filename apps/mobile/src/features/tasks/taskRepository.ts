@@ -31,7 +31,7 @@ const demoTasks: TodayTask[] = [
   { occurrenceId: "demo-journal", taskDefinitionId: "demo-journal", title: "Daily journal", meta: "Write a short reflection", points: 1, proofPolicy: "none", status: "pending" },
 ];
 
-function localDate(): string {
+export function currentLocalDate(): string {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60_000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
@@ -41,7 +41,7 @@ export async function listTodayTasks(challengeId: string): Promise<TodayTask[]> 
   if (!supabase) return demoTasks;
   const { data, error } = await supabase.rpc("list_today_tasks", {
     target_challenge_id: challengeId,
-    requested_local_date: localDate(),
+    requested_local_date: currentLocalDate(),
   });
   if (error) throw error;
   return ((data ?? []) as TodayTaskRow[]).map((row) => {
@@ -72,7 +72,7 @@ export async function submitChallengeDay(input: { challengeId: string; occurrenc
   if (!supabase) return { completedCount: input.occurrenceIds.length, awardedPoints: input.occurrenceIds.length };
   const { data, error } = await supabase.rpc("submit_challenge_day", {
     target_challenge_id: input.challengeId,
-    target_local_date: localDate(),
+    target_local_date: currentLocalDate(),
     selected_occurrence_ids: input.occurrenceIds,
   });
   if (error) throw error;

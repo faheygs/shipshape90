@@ -8,7 +8,7 @@ import { getAvatarUrl } from "../../src/features/auth/authRepository";
 import { useChallenges } from "../../src/features/challenges/useChallenges";
 import { useMyChallengeHistory } from "../../src/features/history/useChallengeHistory";
 import { useChallengeLeaderboard, useMyPerfectDayStreak } from "../../src/features/leaderboard/useChallengeLeaderboard";
-import { useTodayTasks } from "../../src/features/tasks/useTodayTasks";
+import { useTaskSelectionDraft, useTodayTasks } from "../../src/features/tasks/useTodayTasks";
 
 const localDateKey = () => {
   const now = new Date();
@@ -23,7 +23,7 @@ const greeting = () => {
 const shortDate = (value: string) => new Date(`${value}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 export default function HomeScreen() {
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
   const challenges = useChallenges();
   const active = challenges.data?.find((challenge) => challenge.membershipStatus === "active");
   const hosted = (challenges.data ?? []).filter((challenge) => challenge.isOwner && !["complete", "archived"].includes(challenge.challengeStatus));
@@ -35,7 +35,9 @@ export default function HomeScreen() {
   const history = useMyChallengeHistory();
   const tasks = today.data ?? [];
   const done = tasks.filter((task) => task.status === "complete" || task.status === "pending_review").length;
-  const progress = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+  const taskDraft = useTaskSelectionDraft(session?.user.id ?? "preview", active?.id ?? "", tasks, today.isSuccess);
+  const ready = done + taskDraft.selectedIds.length;
+  const progress = tasks.length ? Math.round((ready / tasks.length) * 100) : 0;
   const me = leaderboard.data?.find((entry) => entry.isCurrentUser);
   const initials = profile?.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SS";
   const avatarUrl = getAvatarUrl(profile?.avatarPath ?? null);
@@ -66,7 +68,7 @@ export default function HomeScreen() {
 
         <View style={styles.sectionHead}><Text style={styles.sectionTitle}>Today</Text>{active ? <Text style={styles.sectionMeta}>LIVE</Text> : null}</View>
         {active ? (
-          <Pressable accessibilityRole="button" accessibilityLabel={`Open ${active.name}. ${done} of ${tasks.length} tasks complete. ${me?.totalPoints ?? 0} points.`} onPress={() => router.push(`/challenge/${active.id}`)} style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={`Open ${active.name}. ${ready} of ${tasks.length} tasks ready. ${me?.totalPoints ?? 0} points.`} onPress={() => router.push(`/challenge/${active.id}`)} style={({ pressed }) => [styles.activeCard, pressed && styles.pressed]}>
             <View style={styles.activeTop}><View style={styles.livePill}><View style={styles.liveDot}/><Text style={styles.liveText}>ACTIVE CHALLENGE</Text></View><Icon name="arrow-right" color={theme.colors.brandStrong}/></View>
             <Text style={styles.challengeTitle}>{active.name}</Text>
             <View style={styles.performanceStrip}>
@@ -77,12 +79,13 @@ export default function HomeScreen() {
               <View style={styles.performanceStat}><Text style={styles.performanceValue}>{streak.data ?? 0}</Text><Text style={styles.performanceLabel}>STREAK</Text></View>
             </View>
             <View style={styles.challengeBody}>
-              <ProgressRing value={progress} caption={`${done} of ${tasks.length} complete`} size={104}/>
+              <ProgressRing value={progress} caption={`${ready} of ${tasks.length} ready`} size={104}/>
               <View style={styles.taskPreview}>
                 {tasks.slice(0, 3).map((task) => {
                   const complete = task.status === "complete" || task.status === "pending_review";
                   const missed = task.status === "missed";
-                  return <View key={task.occurrenceId} style={[styles.taskRow, complete && styles.taskRowComplete, missed && styles.taskRowMissed]}><Text numberOfLines={1} style={styles.taskText}>{task.title}</Text><Text style={[styles.taskStatus, complete && styles.taskStatusComplete, missed && styles.taskStatusMissed]}>{missed ? "MISSED" : complete ? "DONE" : "OPEN"}</Text></View>;
+                  const selected = taskDraft.selectedIds.includes(task.occurrenceId);
+                  return <View key={task.occurrenceId} style={[styles.taskRow, (complete || selected) && styles.taskRowComplete, missed && styles.taskRowMissed]}><Text numberOfLines={1} style={styles.taskText}>{task.title}</Text><Text style={[styles.taskStatus, (complete || selected) && styles.taskStatusComplete, missed && styles.taskStatusMissed]}>{missed ? "MISSED" : complete ? "DONE" : selected ? "READY" : "OPEN"}</Text></View>;
                 })}
                 {tasks.length > 3 ? <Text style={styles.moreTasks}>+{tasks.length - 3} more tasks</Text> : null}
                 {today.isLoading ? <Text style={styles.moreTasks}>Loading today’s tasks…</Text> : null}
