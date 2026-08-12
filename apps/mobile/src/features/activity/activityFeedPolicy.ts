@@ -1,8 +1,7 @@
 export const challengeActivityEventTypes = [
   "day_submitted",
-  "perfect_day",
+  "checkin_completed",
   "streak",
-  "rank_change",
   "member_joined",
   "announcement",
 ] as const;

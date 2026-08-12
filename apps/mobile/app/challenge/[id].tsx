@@ -26,9 +26,9 @@ const signedPoints = (value: number) => `${value > 0 ? "+" : value < 0 ? "−" :
 const activityTitle = (entry: { actorName: string; eventType: string; metadata: Record<string, unknown>; body: string | null }) => {
   if (entry.body) return `${entry.actorName} ${entry.body}`;
   if (entry.eventType === "member_joined") return `${entry.actorName} joined the challenge`;
-  if (entry.eventType === "perfect_day") return `${entry.actorName} completed a perfect day`;
   if (entry.eventType === "streak") return `${entry.actorName} extended a streak`;
   if (entry.eventType === "day_submitted") return `${entry.actorName} submitted the day`;
+  if (entry.eventType === "checkin_completed") return `${entry.actorName} completed the ${typeof entry.metadata.label === "string" ? `${entry.metadata.label} check-in` : "required check-in"}`;
   return `${entry.actorName} posted an update`;
 };
 
@@ -103,7 +103,7 @@ export default function ActiveChallengeScreen() {
 
       {section === "leaderboard" ? <><Text style={styles.eyebrow}>LIVE ARENA</Text><Text style={styles.title}>Who’s out front?</Text><Text style={styles.subtitle}>{scoringRule}</Text>{leaderboard.isLoading ? <Text style={styles.subtitle}>Opening the arena…</Text> : null}{leaderboard.isError ? <Text style={styles.errorText}>The ranks couldn’t be loaded.</Text> : null}<GameLeaderboard entries={leaderboard.data ?? []}/></> : null}
       {section === "progress" ? <BodyProgressPanel challengeId={id}/> : null}
-      {section === "activity" ? <><Text style={styles.eyebrow}>CHALLENGE FEED</Text><Text style={styles.title}>Everyone’s moving.</Text><Text style={styles.subtitle}>Submitted days, streaks, milestones, joins, and host announcements.</Text>{challengeActivity.isLoading ? <Text style={styles.subtitle}>Loading challenge activity…</Text> : null}{challengeActivity.isError ? <Text style={styles.errorText}>Challenge activity couldn’t be loaded.</Text> : null}<View style={styles.activityList}>{(challengeActivity.data ?? []).map((entry) => <View key={entry.id} style={styles.activityRow}><View style={styles.activityAvatar}><Text style={styles.activityInitials}>{initialsFor(entry.actorName)}</Text></View><View style={styles.activityCopy}><Text style={styles.activityTitle}>{activityTitle(entry)}</Text><Text style={styles.activityMeta}>{new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{typeof entry.metadata.points === "number" ? ` · ${signedPoints(entry.metadata.points)} points` : ""}</Text></View></View>)}</View></> : null}
+      {section === "activity" ? <><Text style={styles.eyebrow}>CHALLENGE FEED</Text><Text style={styles.title}>The big moments.</Text><Text style={styles.subtitle}>Daily submissions, check-ins, joins, streaks, and host announcements.</Text>{challengeActivity.isLoading ? <Text style={styles.subtitle}>Loading challenge activity…</Text> : null}{challengeActivity.isError ? <Text style={styles.errorText}>Challenge activity couldn’t be loaded.</Text> : null}<View style={styles.activityList}>{(challengeActivity.data ?? []).map((entry) => <View key={entry.id} style={styles.activityRow}><View style={styles.activityAvatar}><Text style={styles.activityInitials}>{initialsFor(entry.actorName)}</Text></View><View style={styles.activityCopy}><Text style={styles.activityTitle}>{activityTitle(entry)}</Text><Text style={styles.activityMeta}>{new Date(entry.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</Text></View></View>)}</View></> : null}
       {section === "history" ? <ChallengeHistoryPanel key={`${id}:${challenge?.startsOn ?? ""}:${challenge?.endsOn ?? ""}`} challengeId={id} challengeStart={challenge?.startsOn} challengeEnd={challenge?.endsOn} leaving={leave.isPending} onLeave={confirmLeave}/> : null}
     </ScrollView>
   </SafeAreaView>;
